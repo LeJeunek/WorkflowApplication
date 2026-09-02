@@ -75,6 +75,46 @@ describe("WorkflowNode", () => {
     expect(container.querySelectorAll("p")).toHaveLength(1);
   });
 
+  it("gives a trigger a source handle but no target handle", () => {
+    const { container } = renderNode(
+      <WorkflowNode
+        {...buildProps({ type: "trigger", data: { label: "New Customer" } })}
+      />,
+    );
+
+    expect(container.querySelectorAll(".react-flow__handle.target")).toHaveLength(0);
+    expect(container.querySelectorAll(".react-flow__handle.source")).toHaveLength(1);
+  });
+
+  it("gives an action one target handle and one unnamed source handle", () => {
+    const { container } = renderNode(
+      <WorkflowNode
+        {...buildProps({ type: "action", data: { label: "Send email" } })}
+      />,
+    );
+
+    expect(container.querySelectorAll(".react-flow__handle.target")).toHaveLength(1);
+    const sources = container.querySelectorAll(".react-flow__handle.source");
+    expect(sources).toHaveLength(1);
+    expect(sources[0].getAttribute("data-handleid")).toBeNull();
+  });
+
+  it("gives a condition two source handles named true and false", () => {
+    const { container } = renderNode(
+      <WorkflowNode
+        {...buildProps({ type: "condition", data: { label: "Is active?" } })}
+      />,
+    );
+
+    const sources = container.querySelectorAll(".react-flow__handle.source");
+    expect(
+      [...sources].map((handle) => handle.getAttribute("data-handleid")),
+    ).toEqual(["true", "false"]);
+
+    expect(screen.getByText("True")).toBeDefined();
+    expect(screen.getByText("False")).toBeDefined();
+  });
+
   it("applies the accent border only when selected", () => {
     const { container: unselected } = renderNode(
       <WorkflowNode

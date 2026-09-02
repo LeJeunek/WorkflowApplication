@@ -158,6 +158,25 @@ describe("canConnect", () => {
     const edges: WorkflowEdge[] = [
       { id: "edge-1", source: "B", target: "C" },
     ];
-    expect(canConnect(NODES, edges, "C", "B")).toBe(false);
+    // C is a condition, so a branch is passed -- without it this would be
+    // rejected for the missing branch and never reach the cycle check.
+    expect(canConnect(NODES, edges, "C", "B", "true")).toBe(false);
+  });
+
+  it("requires a branch on edges leaving a condition", () => {
+    expect(canConnect(NODES, [], "C", "B")).toBe(false);
+    expect(canConnect(NODES, [], "C", "B", "true")).toBe(true);
+  });
+
+  it("rejects a branch on edges leaving a non-condition node", () => {
+    expect(canConnect(NODES, [], "A", "B", "true")).toBe(false);
+  });
+
+  it("treats the same target reached via different branches as distinct", () => {
+    const edges: WorkflowEdge[] = [
+      { id: "edge-1", source: "C", target: "B", sourceHandle: "true" },
+    ];
+    expect(canConnect(NODES, edges, "C", "B", "false")).toBe(true);
+    expect(canConnect(NODES, edges, "C", "B", "true")).toBe(false);
   });
 });

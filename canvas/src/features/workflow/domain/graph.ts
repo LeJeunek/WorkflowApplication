@@ -1,4 +1,9 @@
-import type { WorkflowEdge, WorkflowNode, WorkflowNodeId } from "../types";
+import type {
+  ConditionBranch,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowNodeId,
+} from "../types";
 
 /**
  * Returns true if adding source -> target would create a cycle.
@@ -41,25 +46,29 @@ export function wouldCreateCycle(
 /**
  * Whether drawing an edge from `source` to `target` is allowed.
  *
- * Checked in order, first failing reason wins: both ends must be real
- * nodes, a node can't connect to itself, a trigger can never receive an
- * incoming edge (it's a workflow's entry point by definition), the same
- * (source, target) pair can't be connected twice, and the new edge must
- * not complete a cycle.
+ * Checked in order, first failing reason wins: a node can't connect to
+ * itself, both ends must be real nodes, a trigger can never receive an
+ * incoming edge (it's a workflow's entry point by definition), the branch
+ * must match the source's shape (a Condition names which output it leaves
+ * from; every other type has one unnamed output), the same
+ * (source, branch, target) triple can't be connected twice, and the new
+ * edge must not complete a cycle.
  */
 export function canConnect(
   nodes: readonly WorkflowNode[],
   edges: readonly WorkflowEdge[],
   source: WorkflowNodeId,
   target: WorkflowNodeId,
+  sourceHandle?: ConditionBranch,
 ): boolean {
   if (source === target) {
     return false;
   }
 
   const byId = new Map(nodes.map((node) => [node.id, node]));
+  const sourceNode = byId.get(source);
   const targetNode = byId.get(target);
-  if (!byId.has(source) || !targetNode) {
+  if (!sourceNode || !targetNode) {
     return false;
   }
 
@@ -67,8 +76,18 @@ export function canConnect(
     return false;
   }
 
+  // A condition's edges must say which branch they leave from; every other
+  // node type has a single unnamed output and must not claim one.
+  const branchRequired = sourceNode.type === "condition";
+  if (branchRequired !== (sourceHandle !== undefined)) {
+    return false;
+  }
+
   const alreadyConnected = edges.some(
-    (edge) => edge.source === source && edge.target === target,
+    (edge) =>
+      edge.source === source &&
+      edge.target === target &&
+      edge.sourceHandle === sourceHandle,
   );
   if (alreadyConnected) {
     return false;

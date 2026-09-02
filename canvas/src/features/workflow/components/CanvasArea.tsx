@@ -11,7 +11,11 @@ import type { Edge, NodeTypes, OnConnect, OnNodeDrag } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { useWorkflowStore } from "../state/workflowStore";
-import type { WorkflowEdge, WorkflowNode as WorkflowNodeModel } from "../types";
+import type {
+  ConditionBranch,
+  WorkflowEdge,
+  WorkflowNode as WorkflowNodeModel,
+} from "../types";
 import { WorkflowNode } from "./WorkflowNode";
 import type { WorkflowFlowNode } from "./WorkflowNode";
 
@@ -44,8 +48,18 @@ function toFlowEdge(edge: WorkflowEdge): Edge {
     id: edge.id,
     source: edge.source,
     target: edge.target,
+    sourceHandle: edge.sourceHandle,
     label: edge.label,
   };
+}
+
+/**
+ * React Flow types a handle id as `string | null`; the domain only accepts a
+ * known branch. Sanitizing at this boundary keeps the loose view-layer type
+ * from leaking into the store.
+ */
+function toConditionBranch(value: string | null): ConditionBranch | undefined {
+  return value === "true" || value === "false" ? value : undefined;
 }
 
 /**
@@ -127,7 +141,12 @@ export function CanvasArea() {
   );
 
   const onConnect = useCallback<OnConnect>(
-    (connection) => connectNodes(connection.source, connection.target),
+    (connection) =>
+      connectNodes(
+        connection.source,
+        connection.target,
+        toConditionBranch(connection.sourceHandle),
+      ),
     [connectNodes],
   );
 

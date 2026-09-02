@@ -60,6 +60,15 @@ export interface ConditionConfig {
   value: string;
 }
 
+/** Which output of a Condition node an edge leaves from. */
+export type ConditionBranch = "true" | "false";
+
+/** Every value {@link ConditionBranch} allows, in display order. */
+export const CONDITION_BRANCHES: readonly ConditionBranch[] = [
+  "true",
+  "false",
+];
+
 export interface TriggerNode {
   id: WorkflowNodeId;
   type: "trigger";
@@ -99,7 +108,12 @@ export interface WorkflowEdge {
   id: WorkflowEdgeId;
   source: WorkflowNodeId;
   target: WorkflowNodeId;
-  /** Optional caption, e.g. `"true"` / `"false"` on a condition branch. */
+  /**
+   * Which of a Condition node's outputs this edge leaves from. Undefined for
+   * trigger and action sources, which have a single unnamed output.
+   */
+  sourceHandle?: ConditionBranch;
+  /** Optional display caption drawn on the edge. */
   label?: string;
 }
 

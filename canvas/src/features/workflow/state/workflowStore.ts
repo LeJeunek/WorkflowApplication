@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { canConnect } from "../domain/graph";
 import type {
   ActionConfig,
+  ConditionBranch,
   ConditionConfig,
   IsoDateString,
   NodePosition,
@@ -62,7 +63,11 @@ export interface WorkflowStore {
   moveNode: (id: WorkflowNodeId, position: NodePosition) => void;
 
   /** Records a connection drawn between two nodes. */
-  connectNodes: (source: WorkflowNodeId, target: WorkflowNodeId) => void;
+  connectNodes: (
+    source: WorkflowNodeId,
+    target: WorkflowNodeId,
+    sourceHandle?: ConditionBranch,
+  ) => void;
 
   /** Updates editable properties on an existing node. */
   updateNode: (id: WorkflowNodeId, input: UpdateNodeInput) => void;
@@ -226,9 +231,17 @@ export const useWorkflowStore = create<WorkflowStore>()((set) => ({
       },
     })),
 
-  connectNodes: (source, target) =>
+  connectNodes: (source, target, sourceHandle) =>
     set((state) => {
-      if (!canConnect(state.workflow.nodes, state.workflow.edges, source, target)) {
+      if (
+        !canConnect(
+          state.workflow.nodes,
+          state.workflow.edges,
+          source,
+          target,
+          sourceHandle,
+        )
+      ) {
         return state;
       }
 
@@ -236,6 +249,9 @@ export const useWorkflowStore = create<WorkflowStore>()((set) => ({
         id: crypto.randomUUID(),
         source,
         target,
+        // Spread conditionally so unbranched edges have no `sourceHandle`
+        // key at all, rather than an explicit `undefined`.
+        ...(sourceHandle ? { sourceHandle } : {}),
       };
 
       return {

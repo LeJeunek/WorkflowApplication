@@ -116,6 +116,50 @@ describe("connectNodes", () => {
 
     expect(useWorkflowStore.getState().workflow.edges).toHaveLength(0);
   });
+
+  it("records the branch an edge leaves a condition from", () => {
+    // C is the condition in this fixture.
+    useWorkflowStore.getState().connectNodes("C", "B", "true");
+
+    const edges = useWorkflowStore.getState().workflow.edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({
+      source: "C",
+      target: "B",
+      sourceHandle: "true",
+    });
+  });
+
+  it("omits sourceHandle entirely for an unbranched edge", () => {
+    useWorkflowStore.getState().connectNodes("A", "B");
+
+    const edge = useWorkflowStore.getState().workflow.edges[0];
+    expect(Object.prototype.hasOwnProperty.call(edge, "sourceHandle")).toBe(
+      false,
+    );
+  });
+
+  it("allows both branches of a condition to reach the same node", () => {
+    const store = useWorkflowStore.getState();
+    store.connectNodes("C", "B", "true");
+    store.connectNodes("C", "B", "false");
+
+    expect(useWorkflowStore.getState().workflow.edges).toHaveLength(2);
+  });
+
+  it("still rejects the same branch reaching the same node twice", () => {
+    const store = useWorkflowStore.getState();
+    store.connectNodes("C", "B", "true");
+    store.connectNodes("C", "B", "true");
+
+    expect(useWorkflowStore.getState().workflow.edges).toHaveLength(1);
+  });
+
+  it("rejects an edge leaving a condition with no branch", () => {
+    useWorkflowStore.getState().connectNodes("C", "B");
+
+    expect(useWorkflowStore.getState().workflow.edges).toHaveLength(0);
+  });
 });
 
 describe("deleteNode", () => {

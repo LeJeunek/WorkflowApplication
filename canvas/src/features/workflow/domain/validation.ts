@@ -11,7 +11,9 @@ export interface ValidationError {
     | "self-loop"
     | "duplicate-edge"
     | "cycle"
-    | "trigger-has-incoming-edge";
+    | "trigger-has-incoming-edge"
+    | "missing-branch"
+    | "unexpected-branch";
   message: string;
   nodeId?: WorkflowNodeId;
   edgeId?: WorkflowEdgeId;
@@ -35,6 +37,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
   const seenPairCounts = new Map<string, number>();
 
   for (const edge of workflow.edges) {
+    const sourceNode = nodesById.get(edge.source);
     const targetNode = nodesById.get(edge.target);
 
     if (!nodesById.has(edge.source) || !targetNode) {
@@ -62,7 +65,31 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
       });
     }
 
-    const pairKey = `${edge.source}->${edge.target}`;
+    // A Condition names which output an edge leaves from; every other node
+    // type has one unnamed output and must not claim a branch.
+    if (sourceNode?.type === "condition" && edge.sourceHandle === undefined) {
+      errors.push({
+        code: "missing-branch",
+        message: `Edge ${edge.id} leaves condition ${edge.source} without naming a branch.`,
+        nodeId: edge.source,
+        edgeId: edge.id,
+      });
+    }
+
+    if (
+      sourceNode !== undefined &&
+      sourceNode.type !== "condition" &&
+      edge.sourceHandle !== undefined
+    ) {
+      errors.push({
+        code: "unexpected-branch",
+        message: `Edge ${edge.id} names a branch, but ${edge.source} is not a condition.`,
+        nodeId: edge.source,
+        edgeId: edge.id,
+      });
+    }
+
+    const pairKey = `${edge.source}:${edge.sourceHandle ?? ""}->${edge.target}`;
     const seenCount = seenPairCounts.get(pairKey) ?? 0;
     if (seenCount > 0) {
       errors.push({

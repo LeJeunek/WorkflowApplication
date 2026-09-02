@@ -2,6 +2,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
 import { Cog, GitBranch, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { CONDITION_BRANCHES } from '../types';
 import type { NodeType } from '../types';
 
 /**
@@ -56,7 +57,10 @@ export function WorkflowNode({
           : 'border-line hover:border-line-strong'
       }`}
     >
-      <Handle type="target" position={Position.Left} />
+      {/* A trigger starts a workflow, so nothing may connect into it. */}
+      {type !== 'trigger' ? (
+        <Handle type="target" position={Position.Left} />
+      ) : null}
 
       <div className="flex items-center gap-2 border-b border-line px-2.5 py-1.5">
         <span
@@ -78,7 +82,23 @@ export function WorkflowNode({
         ) : null}
       </div>
 
-      <Handle type="source" position={Position.Right} />
+      {type === 'condition' ? (
+        <div className="border-t border-line">
+          {CONDITION_BRANCHES.map((branch, index) => (
+            <div
+              key={branch}
+              className={`relative flex items-center justify-end px-2.5 py-1.5 text-[10px] font-medium text-ink-faint ${
+                index > 0 ? 'border-t border-line' : ''
+              }`}
+            >
+              {branch === 'true' ? 'True' : 'False'}
+              <Handle type="source" id={branch} position={Position.Right} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Handle type="source" position={Position.Right} />
+      )}
     </div>
   );
 }

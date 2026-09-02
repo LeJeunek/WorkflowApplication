@@ -103,7 +103,7 @@ describe("validateWorkflow", () => {
   it("flags every edge that participates in a cycle", () => {
     const workflow = buildWorkflow([
       { id: "edge-1", source: "B", target: "C" },
-      { id: "edge-2", source: "C", target: "B" },
+      { id: "edge-2", source: "C", target: "B", sourceHandle: "true" },
     ]);
 
     const result = validateWorkflow(workflow);
@@ -136,10 +136,59 @@ describe("validateWorkflow", () => {
     }
   });
 
+  it("does not flag two branches of one condition reaching the same node", () => {
+    const workflow = buildWorkflow([
+      { id: "edge-1", source: "C", target: "B", sourceHandle: "true" },
+      { id: "edge-2", source: "C", target: "B", sourceHandle: "false" },
+    ]);
+
+    const result = validateWorkflow(workflow);
+    if (!result.valid) {
+      expect(result.errors).not.toContainEqual(
+        expect.objectContaining({ code: "duplicate-edge" }),
+      );
+    }
+  });
+
+  it("flags an edge leaving a condition without a branch", () => {
+    const workflow = buildWorkflow([
+      { id: "edge-1", source: "C", target: "B" },
+    ]);
+
+    const result = validateWorkflow(workflow);
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ code: "missing-branch", nodeId: "C" }),
+      );
+    }
+  });
+
+  it("flags a branch on an edge leaving a non-condition node", () => {
+    const workflow = buildWorkflow([
+      { id: "edge-1", source: "A", target: "B", sourceHandle: "true" },
+    ]);
+
+    const result = validateWorkflow(workflow);
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ code: "unexpected-branch", nodeId: "A" }),
+      );
+    }
+  });
+
   it("collects multiple distinct errors instead of stopping at the first", () => {
     const workflow = buildWorkflow([
       { id: "edge-1", source: "B", target: "A" }, // trigger-has-incoming-edge
-      { id: "edge-2", source: "C", target: "does-not-exist" }, // dangling-edge
+      // C is a condition, so this carries a branch -- otherwise it would
+      // also (correctly) report missing-branch and muddy what's asserted.
+      {
+        id: "edge-2",
+        source: "C",
+        target: "does-not-exist",
+        sourceHandle: "true",
+      }, // dangling-edge
     ]);
 
     const result = validateWorkflow(workflow);

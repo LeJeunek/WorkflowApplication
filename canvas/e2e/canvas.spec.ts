@@ -206,3 +206,49 @@ test("the header shows the workflow's real name and lets you rename it", async (
 
   await expect(nameInput).toHaveValue("Customer Onboarding");
 });
+
+test("a condition node exposes labelled true and false outputs that connect independently", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+
+  const condition = page.locator(".react-flow__node-condition");
+  const action = page.locator(".react-flow__node-action");
+  await expect(condition).toBeVisible();
+  await expect(action).toBeVisible();
+
+  await expect(condition.getByText("True")).toBeVisible();
+  await expect(condition.getByText("False")).toBeVisible();
+
+  // KNOWN ISSUE (not introduced by branching -- see notes): a node created
+  // from the palette cannot be used as a connection SOURCE until some
+  // viewport change forces React Flow to re-measure it. Without this click,
+  // onConnectEnd reports `toHandle: null, isValid: null` and no edge is
+  // made. Fitting the view is the smallest realistic action that clears it.
+  await page.getByRole("button", { name: "Fit view" }).click();
+  await page.waitForTimeout(300);
+
+  // Each branch is an independently connectable output, so the same target
+  // can be reached from both without the second read as a duplicate.
+  await connectHandles(
+    page,
+    condition.locator('[data-handleid="true"]'),
+    action.locator(".react-flow__handle.target"),
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  await connectHandles(
+    page,
+    condition.locator('[data-handleid="false"]'),
+    action.locator(".react-flow__handle.target"),
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+});
+
+test("a trigger node exposes no target handle", async ({ page }) => {
+  const trigger = page.locator('[data-id="trigger-new-customer"]');
+
+  await expect(trigger.locator(".react-flow__handle.source")).toHaveCount(1);
+  await expect(trigger.locator(".react-flow__handle.target")).toHaveCount(0);
+});
