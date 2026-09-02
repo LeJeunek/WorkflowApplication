@@ -28,18 +28,33 @@ export type NewNodeInput =
       type: "trigger";
       label: string;
       position?: NodePosition;
+      /**
+       * Where to begin the free-slot search. Defaults to the flow origin, so
+       * callers that do not care about the viewport keep the old behaviour.
+       */
+      origin?: NodePosition;
       config: TriggerConfig;
     }
   | {
       type: "action";
       label: string;
       position?: NodePosition;
+      /**
+       * Where to begin the free-slot search. Defaults to the flow origin, so
+       * callers that do not care about the viewport keep the old behaviour.
+       */
+      origin?: NodePosition;
       config: ActionConfig;
     }
   | {
       type: "condition";
       label: string;
       position?: NodePosition;
+      /**
+       * Where to begin the free-slot search. Defaults to the flow origin, so
+       * callers that do not care about the viewport keep the old behaviour.
+       */
+      origin?: NodePosition;
       config: ConditionConfig;
     };
 
@@ -90,10 +105,10 @@ export const ROW_SPACING = 150;
 export const NODES_PER_ROW = 4;
 
 /** The grid coordinate for the nth auto-placed slot, left to right, wrapping rows. */
-function gridSlot(index: number): NodePosition {
+function gridSlot(index: number, origin: NodePosition): NodePosition {
   return {
-    x: (index % NODES_PER_ROW) * COLUMN_SPACING,
-    y: Math.floor(index / NODES_PER_ROW) * ROW_SPACING,
+    x: origin.x + (index % NODES_PER_ROW) * COLUMN_SPACING,
+    y: origin.y + Math.floor(index / NODES_PER_ROW) * ROW_SPACING,
   };
 }
 
@@ -107,16 +122,39 @@ function gridSlot(index: number): NodePosition {
  * later-added node already sits there, stacking two nodes on top of each
  * other.
  */
-function nextPosition(nodes: readonly WorkflowNode[]): NodePosition {
+/** The flow-space origin, used when a caller supplies no anchor of its own. */
+const FLOW_ORIGIN: NodePosition = { x: 0, y: 0 };
+
+/**
+ * Snaps an arbitrary origin onto the fixed lattice `gridSlot` already uses.
+ *
+ * `nextPosition`'s occupancy check compares exact coordinates, which only
+ * catches a collision when two calls land on the *same* grid. A viewport-
+ * derived origin (see `NodePalette`) drifts with every pan and zoom, so
+ * without snapping, two adds a moment apart would search two different
+ * grids and could place a node directly on top of an existing one without
+ * either being detected as occupied.
+ */
+function snapToGrid(origin: NodePosition): NodePosition {
+  return {
+    x: Math.round(origin.x / COLUMN_SPACING) * COLUMN_SPACING,
+    y: Math.round(origin.y / ROW_SPACING) * ROW_SPACING,
+  };
+}
+
+function nextPosition(
+  nodes: readonly WorkflowNode[],
+  origin: NodePosition,
+): NodePosition {
   const occupied = new Set(
     nodes.map((node) => `${node.position.x},${node.position.y}`),
   );
 
   let index = 0;
-  let candidate = gridSlot(index);
+  let candidate = gridSlot(index, origin);
   while (occupied.has(`${candidate.x},${candidate.y}`)) {
     index += 1;
-    candidate = gridSlot(index);
+    candidate = gridSlot(index, origin);
   }
   return candidate;
 }
@@ -169,7 +207,11 @@ export const useWorkflowStore = create<WorkflowStore>()((set) => ({
   addNode: (input) =>
     set((state) => {
       const position =
-        input.position ?? nextPosition(state.workflow.nodes);
+        input.position ??
+        nextPosition(
+          state.workflow.nodes,
+          snapToGrid(input.origin ?? FLOW_ORIGIN),
+        );
 
       const id = crypto.randomUUID();
 

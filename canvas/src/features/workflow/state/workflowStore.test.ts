@@ -634,6 +634,52 @@ describe("addNode", () => {
     expect(new Set(positions).size).toBe(positions.length);
   });
 
+  it("snaps a supplied origin onto the shared grid instead of using it verbatim", () => {
+    useWorkflowStore.getState().addNode({
+      type: "trigger",
+      label: "N0",
+      // 20 and 15 are well inside the nearest grid cell rather than on it,
+      // proving the store snaps rather than offsetting by the raw value.
+      origin: { x: 20, y: 15 },
+      config: { event: "test" },
+    });
+
+    const node = useWorkflowStore.getState().workflow.nodes[0];
+    expect(node.position).toEqual({ x: 0, y: 0 });
+  });
+
+  it("never overlaps an existing node even when successive calls supply drifting origins", () => {
+    // Simulates the palette's viewport-derived origin, which shifts by a few
+    // pixels between adds as the canvas pans -- without snapping to a shared
+    // grid, each call would search its own grid and could place a node
+    // directly on top of one placed under a different origin.
+    const store = useWorkflowStore.getState();
+    store.addNode({
+      type: "trigger",
+      label: "N0",
+      origin: { x: 4, y: -6 },
+      config: { event: "test" },
+    });
+    store.addNode({
+      type: "action",
+      label: "N1",
+      origin: { x: -9, y: 3 },
+      config: { action: "test" },
+    });
+    store.addNode({
+      type: "condition",
+      label: "N2",
+      origin: { x: 118, y: -71 },
+      config: { field: "", operator: "equals", value: "" },
+    });
+
+    const positions = useWorkflowStore
+      .getState()
+      .workflow.nodes.map((node) => `${node.position.x},${node.position.y}`);
+
+    expect(new Set(positions).size).toBe(positions.length);
+  });
+
   it("assigns every node a unique id", () => {
     const store = useWorkflowStore.getState();
     store.addNode({ type: "trigger", label: "N0", config: { event: "test" } });

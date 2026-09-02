@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -6,6 +6,8 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  useReactFlow,
+  useStoreApi,
 } from "@xyflow/react";
 import type { Edge, NodeTypes, OnConnect, OnNodeDrag } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -29,6 +31,23 @@ const nodeTypes: NodeTypes = {
   condition: WorkflowNode,
 };
 
+/**
+ * Options for every programmatic fit, kept identical to the mount-time
+ * `fitViewOptions` so an automatic fit lands the viewport where a manual
+ * "Fit view" click would.
+ */
+const FIT_VIEW_OPTIONS = { padding: 0.4, maxZoom: 1 } as const;
+
+/**
+ * How much clear space a node needs inside the pane to count as "on screen".
+ *
+ * Deliberately larger than React Flow's 40px auto-pan margin: a node sitting
+ * inside that margin is technically visible but unusable as a connection
+ * endpoint, because starting a drag there makes the canvas pan away under the
+ * cursor and the handle moves out from under the drop.
+ */
+const VIEWPORT_MARGIN = 48;
+
 /** Narrows a domain node to the shape React Flow renders. */
 function toFlowNode(node: WorkflowNodeModel): WorkflowFlowNode {
   return {
@@ -51,6 +70,27 @@ function toFlowEdge(edge: WorkflowEdge): Edge {
     sourceHandle: edge.sourceHandle,
     label: edge.label,
   };
+}
+
+/** Whether a measured node sits fully inside the pane, margin included. */
+function isComfortablyInView(
+  node: WorkflowFlowNode,
+  width: number,
+  height: number,
+  transform: [number, number, number],
+): boolean {
+  const [translateX, translateY, zoom] = transform;
+  const left = node.position.x * zoom + translateX;
+  const top = node.position.y * zoom + translateY;
+  const right = left + (node.measured?.width ?? 0) * zoom;
+  const bottom = top + (node.measured?.height ?? 0) * zoom;
+
+  return (
+    left >= VIEWPORT_MARGIN &&
+    top >= VIEWPORT_MARGIN &&
+    right <= width - VIEWPORT_MARGIN &&
+    bottom <= height - VIEWPORT_MARGIN
+  );
 }
 
 /**
@@ -135,6 +175,47 @@ export function CanvasArea() {
     setSelectedNodeId(nodes.find((node) => node.selected)?.id ?? null);
   }, [nodes, setSelectedNodeId]);
 
+  /**
+   * Keep newly added nodes reachable.
+   *
+   * Node placement is pure domain logic in flow coordinates, so it cannot know
+   * how much canvas is on screen: a fixed grid marches rightwards and, in a
+   * narrow pane, the third node already lands past the edge. Rather than
+   * teaching the store about the viewport, the view catches up -- but only
+   * when it has to, so a deliberate pan or zoom is never overridden.
+   *
+   * Keyed off `measured` rather than the store, because a node's size is
+   * unknown until React Flow has laid it out, and fitting without it would
+   * compute the wrong bounds.
+   */
+  const { fitView } = useReactFlow();
+  const storeApi = useStoreApi();
+  const settledNodeIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    const settled = settledNodeIds.current;
+    const currentIds = new Set(nodes.map((node) => node.id));
+    for (const id of settled) {
+      if (!currentIds.has(id)) settled.delete(id);
+    }
+
+    const arrived = nodes.filter(
+      (node) => node.measured?.width && !settled.has(node.id),
+    );
+    if (arrived.length === 0) return;
+    arrived.forEach((node) => settled.add(node.id));
+
+    const { width, height, transform } = storeApi.getState();
+    if (!width || !height) return;
+
+    const needsFit = arrived.some(
+      (node) => !isComfortablyInView(node, width, height, transform),
+    );
+    if (needsFit) {
+      void fitView({ ...FIT_VIEW_OPTIONS, duration: 200 });
+    }
+  }, [nodes, fitView, storeApi]);
+
   const onNodeDragStop = useCallback<OnNodeDrag<WorkflowFlowNode>>(
     (_event, node) => moveNode(node.id, node.position),
     [moveNode],
@@ -169,7 +250,7 @@ export function CanvasArea() {
         minZoom={0.25}
         maxZoom={2}
         fitView
-        fitViewOptions={{ padding: 0.4, maxZoom: 1 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
       >
         <Background
           variant={BackgroundVariant.Dots}

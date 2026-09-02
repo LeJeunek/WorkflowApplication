@@ -1,3 +1,4 @@
+import { useStore } from "@xyflow/react";
 import { Cog, GitBranch, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -7,9 +8,15 @@ import type { NewNodeInput } from "../state/workflowStore";
 import type {
   ActionConfig,
   ConditionConfig,
+  NodePosition,
   NodeType,
   TriggerConfig,
 } from "../types";
+
+/** Matches the `w-48` node body in WorkflowNode; used only to centre it. */
+const NODE_WIDTH = 192;
+/** Roughly half a node's height -- exact size is not known until it renders. */
+const HALF_NODE_HEIGHT = 40;
 
 /** Icon and accent colour keyed to each node type, matching WorkflowNode. */
 const NODE_PRESENTATION: Record<NodeType, { icon: LucideIcon; tone: string }> = {
@@ -35,6 +42,14 @@ const NODE_OPTIONS: Array<{
     label: "Condition",
   },
 ];
+
+/**
+ * `useStore` selectors returning a new object every render would loop forever with
+ * the default reference check, so compare by value.
+ */
+function shallowPosition(a: NodePosition, b: NodePosition): boolean {
+  return a.x === b.x && a.y === b.y;
+}
 
 function createDefaultNodeInput(type: NodeType, label: string): NewNodeInput {
   switch (type) {
@@ -81,6 +96,22 @@ function createDefaultNodeInput(type: NodeType, label: string): NewNodeInput {
 export function NodePalette() {
   const addNode = useWorkflowStore((state) => state.addNode);
 
+  /**
+   * Flow coordinates of the canvas centre, so a new node lands where the user
+   * is currently looking instead of at a fixed spot that may be scrolled out
+   * of sight. Read from React Flow's store rather than measured from the DOM.
+   */
+  const origin = useStore((state): NodePosition => {
+    const [translateX, translateY, zoom] = state.transform;
+    if (!state.width || !state.height) {
+      return { x: 0, y: 0 };
+    }
+    return {
+      x: (state.width / 2 - translateX) / zoom - NODE_WIDTH / 2,
+      y: (state.height / 2 - translateY) / zoom - HALF_NODE_HEIGHT,
+    };
+  }, shallowPosition);
+
   return (
     <aside
       aria-label="Nodes"
@@ -109,7 +140,10 @@ export function NodePalette() {
                   type="button"
                   aria-label={`Add ${label} node`}
                   onClick={() =>
-                    addNode(createDefaultNodeInput(type, defaultLabel))
+                    addNode({
+                      ...createDefaultNodeInput(type, defaultLabel),
+                      origin,
+                    })
                   }
                   className="flex w-full items-center gap-2.5 rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-line-strong hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
                 >

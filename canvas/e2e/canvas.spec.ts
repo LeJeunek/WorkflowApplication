@@ -172,6 +172,11 @@ test("deleting an edge removes it permanently, even after an unrelated node is l
   await expect(page.locator(".react-flow__node-action")).toBeVisible();
   await expect(page.locator(".react-flow__node-condition")).toBeVisible();
 
+  // A third node can trigger an automatic fit-into-view; wait for that 200ms
+  // animation to settle so the drag below reads final, not mid-animation,
+  // handle positions.
+  await page.waitForTimeout(400);
+
   await connectHandles(
     page,
     page.locator('[data-id="trigger-new-customer"] .react-flow__handle-right'),
@@ -221,13 +226,10 @@ test("a condition node exposes labelled true and false outputs that connect inde
   await expect(condition.getByText("True")).toBeVisible();
   await expect(condition.getByText("False")).toBeVisible();
 
-  // KNOWN ISSUE (not introduced by branching -- see notes): a node created
-  // from the palette cannot be used as a connection SOURCE until some
-  // viewport change forces React Flow to re-measure it. Without this click,
-  // onConnectEnd reports `toHandle: null, isValid: null` and no edge is
-  // made. Fitting the view is the smallest realistic action that clears it.
-  await page.getByRole("button", { name: "Fit view" }).click();
-  await page.waitForTimeout(300);
+  // Adding a node can trigger an automatic fit when it would otherwise land
+  // outside the pane; wait for that 200ms animation to settle before reading
+  // handle positions, or the drag starts from stale coordinates.
+  await page.waitForTimeout(400);
 
   // Each branch is an independently connectable output, so the same target
   // can be reached from both without the second read as a duplicate.
@@ -251,4 +253,62 @@ test("a trigger node exposes no target handle", async ({ page }) => {
 
   await expect(trigger.locator(".react-flow__handle.source")).toHaveCount(1);
   await expect(trigger.locator(".react-flow__handle.target")).toHaveCount(0);
+});
+
+test("every node added from the palette stays inside the visible canvas", async ({
+  page,
+}) => {
+  // Four adds push past what a single grid row can span at zoom 1, which is
+  // exactly the case that used to leave a node parked on the pane boundary --
+  // visible, but impossible to connect, because starting a drag there makes
+  // React Flow auto-pan the canvas out from under the cursor.
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+
+  await expect(page.locator(".react-flow__node")).toHaveCount(5);
+  await page.waitForTimeout(500);
+
+  const pane = await page.locator(".react-flow__pane").boundingBox();
+  if (!pane) throw new Error("pane has no bounding box");
+
+  const boxes = await page.locator(".react-flow__node").evaluateAll((els) =>
+    els.map((el) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        id: el.getAttribute("data-id"),
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+      };
+    }),
+  );
+
+  for (const box of boxes) {
+    expect(box.left, `node ${box.id} clipped on the left`).toBeGreaterThanOrEqual(pane.x);
+    expect(box.top, `node ${box.id} clipped on the top`).toBeGreaterThanOrEqual(pane.y);
+    expect(box.right, `node ${box.id} clipped on the right`).toBeLessThanOrEqual(pane.x + pane.width);
+    expect(box.bottom, `node ${box.id} clipped on the bottom`).toBeLessThanOrEqual(pane.y + pane.height);
+  }
+});
+
+test("a node added from the palette can immediately be used as a connection source", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(3);
+  await page.waitForTimeout(500);
+
+  // No "Fit view" click, no pan: the canvas must already be in a state where
+  // a freshly created node can start a connection.
+  await connectHandles(
+    page,
+    page.locator('.react-flow__node-condition [data-handleid="true"]'),
+    page.locator(".react-flow__node-action .react-flow__handle.target"),
+  );
+
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 });

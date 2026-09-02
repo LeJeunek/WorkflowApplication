@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ReactFlowProvider } from "@xyflow/react";
 
 import { useWorkflowStore } from "../state/workflowStore";
 import type { Workflow } from "../types";
@@ -21,9 +22,22 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/**
+ * The palette reads the canvas viewport to decide where a new node lands, so
+ * it needs React Flow's context even though it renders none of the canvas.
+ * jsdom reports a zero-sized pane, which the component falls back on.
+ */
+function renderPalette() {
+  return render(
+    <ReactFlowProvider>
+      <NodePalette />
+    </ReactFlowProvider>,
+  );
+}
+
 describe("NodePalette", () => {
   it("renders one labelled button per node type", () => {
-    render(<NodePalette />);
+    renderPalette();
 
     expect(screen.getByRole("button", { name: "Add Trigger node" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Add Action node" })).toBeDefined();
@@ -31,7 +45,7 @@ describe("NodePalette", () => {
   });
 
   it("clicking Trigger adds a trigger node with its default label and config", () => {
-    render(<NodePalette />);
+    renderPalette();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Trigger node" }));
 
@@ -45,7 +59,7 @@ describe("NodePalette", () => {
 
   it("does not change the current selection when adding a node", () => {
     useWorkflowStore.setState({ selectedNodeId: "some-other-node" });
-    render(<NodePalette />);
+    renderPalette();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Action node" }));
 
@@ -53,7 +67,7 @@ describe("NodePalette", () => {
   });
 
   it("sequential clicks across types create distinct nodes with unique ids, in click order", () => {
-    render(<NodePalette />);
+    renderPalette();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Trigger node" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Action node" }));
