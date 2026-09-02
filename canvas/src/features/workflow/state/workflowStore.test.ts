@@ -23,6 +23,7 @@ describe("connectNodes", () => {
             data: {
               label: "A",
               config: {
+                kind: "event",
                 event: "test",
               },
             },
@@ -34,7 +35,7 @@ describe("connectNodes", () => {
             data: {
               label: "B",
               config: {
-                action: "test",
+                kind: "send_email",
               },
             },
           },
@@ -173,13 +174,13 @@ describe("deleteNode", () => {
             id: "A",
             type: "trigger",
             position: { x: 0, y: 0 },
-            data: { label: "A", config: { event: "test" } },
+            data: { label: "A", config: { kind: "event", event: "test" } },
           },
           {
             id: "B",
             type: "action",
             position: { x: 100, y: 0 },
-            data: { label: "B", config: { action: "test" } },
+            data: { label: "B", config: { kind: "send_email" } },
           },
           {
             id: "C",
@@ -272,13 +273,13 @@ describe("deleteEdge", () => {
             id: "A",
             type: "trigger",
             position: { x: 0, y: 0 },
-            data: { label: "A", config: { event: "test" } },
+            data: { label: "A", config: { kind: "event", event: "test" } },
           },
           {
             id: "B",
             type: "action",
             position: { x: 100, y: 0 },
-            data: { label: "B", config: { action: "test" } },
+            data: { label: "B", config: { kind: "send_email" } },
           },
           {
             id: "C",
@@ -335,13 +336,13 @@ describe("updateNode", () => {
             id: "A",
             type: "trigger",
             position: { x: 0, y: 0 },
-            data: { label: "A", config: { event: "test" } },
+            data: { label: "A", config: { kind: "event", event: "test" } },
           },
           {
             id: "B",
             type: "action",
             position: { x: 100, y: 0 },
-            data: { label: "B", config: { action: "test" } },
+            data: { label: "B", config: { kind: "send_email" } },
           },
           {
             id: "C",
@@ -442,13 +443,13 @@ describe("updateNodeConfig", () => {
             id: "A",
             type: "trigger",
             position: { x: 0, y: 0 },
-            data: { label: "A", config: { event: "test" } },
+            data: { label: "A", config: { kind: "event", event: "test" } },
           },
           {
             id: "B",
             type: "action",
             position: { x: 100, y: 0 },
-            data: { label: "B", config: { action: "test" } },
+            data: { label: "B", config: { kind: "send_email" } },
           },
           {
             id: "C",
@@ -469,22 +470,30 @@ describe("updateNodeConfig", () => {
   });
   it("updates a trigger config", () => {
     useWorkflowStore.getState().updateNodeConfig("A", {
+      kind: "event",
       event: "customer.update",
     });
     const nodeA = useWorkflowStore
       .getState()
       .workflow.nodes.find((node) => node.id === "A");
-    expect(nodeA?.data.config).toEqual({ event: "customer.update" });
+    expect(nodeA?.data.config).toEqual({
+      kind: "event",
+      event: "customer.update",
+    });
   });
 
   it("updates an action config", () => {
     useWorkflowStore.getState().updateNodeConfig("B", {
-      action: "send_email",
+      kind: "send_email",
+      recipient: "ops@example.com",
     });
     const nodeB = useWorkflowStore
       .getState()
       .workflow.nodes.find((node) => node.id === "B");
-    expect(nodeB?.data.config).toEqual({ action: "send_email" });
+    expect(nodeB?.data.config).toEqual({
+      kind: "send_email",
+      recipient: "ops@example.com",
+    });
   });
 
   it("updates a condition config", () => {
@@ -506,36 +515,50 @@ describe("updateNodeConfig", () => {
   // The store's signature is `updateNodeConfig(id, config)`, with no type
   // link between `id` and `config` -- TypeScript accepts this call even
   // though node "A" is a trigger and the config shape is an ActionConfig.
-  // The reducer's own runtime duck-type guard is the only thing standing
-  // between this and a trigger node ending up with an action's config.
+  // The reducer's own runtime `isTriggerConfig`/`isActionConfig` guards are
+  // the only thing standing between this and a trigger node ending up with
+  // an action's config.
   it("ignores a config update whose shape does not match the target node's type", () => {
-    useWorkflowStore.getState().updateNodeConfig("A", { action: "send_email" });
+    useWorkflowStore
+      .getState()
+      .updateNodeConfig("A", { kind: "send_email" });
 
     const nodeA = useWorkflowStore
       .getState()
       .workflow.nodes.find((node) => node.id === "A");
 
-    expect(nodeA?.data.config).toEqual({ event: "test" });
+    expect(nodeA?.data.config).toEqual({ kind: "event", event: "test" });
   });
 
-  it("replaces the config wholesale rather than merging with the previous value", () => {
+  it("replaces the config wholesale rather than merging with the previous value, even across kinds", () => {
     const store = useWorkflowStore.getState();
     store.updateNodeConfig("B", {
-      action: "send_email",
+      kind: "send_email",
       recipient: "ops@example.com",
     });
-    store.updateNodeConfig("B", { action: "send_sms" });
+    store.updateNodeConfig("B", {
+      kind: "http_request",
+      url: "https://example.com/hook",
+      method: "GET",
+    });
 
     const nodeB = useWorkflowStore
       .getState()
       .workflow.nodes.find((node) => node.id === "B");
 
-    expect(nodeB?.data.config).toEqual({ action: "send_sms" });
+    // If this merged instead of replacing, the stale `recipient` field from
+    // the send_email variant would still be present alongside url/method.
+    expect(nodeB?.data.config).toEqual({
+      kind: "http_request",
+      url: "https://example.com/hook",
+      method: "GET",
+    });
   });
 
   it("does nothing when updating config for an unknown node id", () => {
     const before = useWorkflowStore.getState().workflow.nodes;
     useWorkflowStore.getState().updateNodeConfig("does-not-exist", {
+      kind: "event",
       event: "x",
     });
     expect(useWorkflowStore.getState().workflow.nodes).toEqual(before);
@@ -561,7 +584,7 @@ describe("addNode", () => {
     useWorkflowStore.getState().addNode({
       type: "trigger",
       label: "",
-      config: { event: "test" },
+      config: { kind: "event", event: "test" },
     });
 
     const node = useWorkflowStore.getState().workflow.nodes[0];
@@ -571,8 +594,8 @@ describe("addNode", () => {
 
   it("places nodes left to right across a row using the column spacing", () => {
     const store = useWorkflowStore.getState();
-    store.addNode({ type: "trigger", label: "N0", config: { event: "test" } });
-    store.addNode({ type: "action", label: "N1", config: { action: "test" } });
+    store.addNode({ type: "trigger", label: "N0", config: { kind: "event", event: "test" } });
+    store.addNode({ type: "action", label: "N1", config: { kind: "send_email" } });
     store.addNode({
       type: "condition",
       label: "N2",
@@ -596,10 +619,10 @@ describe("addNode", () => {
       store.addNode({
         type: "trigger",
         label: `N${i}`,
-        config: { event: "test" },
+        config: { kind: "event", event: "test" },
       });
     }
-    store.addNode({ type: "trigger", label: "overflow", config: { event: "test" } });
+    store.addNode({ type: "trigger", label: "overflow", config: { kind: "event", event: "test" } });
 
     const positions = useWorkflowStore
       .getState()
@@ -614,8 +637,8 @@ describe("addNode", () => {
 
   it("does not place a new node on top of a survivor after deleting a mid-sequence node", () => {
     const store = useWorkflowStore.getState();
-    store.addNode({ type: "trigger", label: "N0", config: { event: "test" } });
-    store.addNode({ type: "action", label: "N1", config: { action: "test" } });
+    store.addNode({ type: "trigger", label: "N0", config: { kind: "event", event: "test" } });
+    store.addNode({ type: "action", label: "N1", config: { kind: "send_email" } });
     store.addNode({
       type: "condition",
       label: "N2",
@@ -625,7 +648,7 @@ describe("addNode", () => {
     const middleNodeId = useWorkflowStore.getState().workflow.nodes[1].id;
     store.deleteNode(middleNodeId);
 
-    store.addNode({ type: "trigger", label: "N3", config: { event: "test" } });
+    store.addNode({ type: "trigger", label: "N3", config: { kind: "event", event: "test" } });
 
     const positions = useWorkflowStore
       .getState()
@@ -641,7 +664,7 @@ describe("addNode", () => {
       // 20 and 15 are well inside the nearest grid cell rather than on it,
       // proving the store snaps rather than offsetting by the raw value.
       origin: { x: 20, y: 15 },
-      config: { event: "test" },
+      config: { kind: "event", event: "test" },
     });
 
     const node = useWorkflowStore.getState().workflow.nodes[0];
@@ -658,13 +681,13 @@ describe("addNode", () => {
       type: "trigger",
       label: "N0",
       origin: { x: 4, y: -6 },
-      config: { event: "test" },
+      config: { kind: "event", event: "test" },
     });
     store.addNode({
       type: "action",
       label: "N1",
       origin: { x: -9, y: 3 },
-      config: { action: "test" },
+      config: { kind: "send_email" },
     });
     store.addNode({
       type: "condition",
@@ -682,8 +705,8 @@ describe("addNode", () => {
 
   it("assigns every node a unique id", () => {
     const store = useWorkflowStore.getState();
-    store.addNode({ type: "trigger", label: "N0", config: { event: "test" } });
-    store.addNode({ type: "trigger", label: "N1", config: { event: "test" } });
+    store.addNode({ type: "trigger", label: "N0", config: { kind: "event", event: "test" } });
+    store.addNode({ type: "trigger", label: "N1", config: { kind: "event", event: "test" } });
 
     const ids = useWorkflowStore.getState().workflow.nodes.map((node) => node.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -694,7 +717,7 @@ describe("addNode", () => {
       type: "trigger",
       label: "Explicit",
       position: { x: 999, y: -50 },
-      config: { event: "test" },
+      config: { kind: "event", event: "test" },
     });
 
     expect(useWorkflowStore.getState().workflow.nodes[0].position).toEqual({
@@ -715,13 +738,13 @@ describe("moveNode", () => {
             id: "A",
             type: "trigger",
             position: { x: 0, y: 0 },
-            data: { label: "A", config: { event: "test" } },
+            data: { label: "A", config: { kind: "event", event: "test" } },
           },
           {
             id: "B",
             type: "action",
             position: { x: 100, y: 0 },
-            data: { label: "B", config: { action: "test" } },
+            data: { label: "B", config: { kind: "send_email" } },
           },
           {
             id: "C",
@@ -780,7 +803,7 @@ describe("setSelectedNodeId", () => {
             id: "A",
             type: "trigger",
             position: { x: 0, y: 0 },
-            data: { label: "A", config: { event: "test" } },
+            data: { label: "A", config: { kind: "event", event: "test" } },
           },
         ],
         edges: [],

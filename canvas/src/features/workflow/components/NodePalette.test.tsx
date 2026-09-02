@@ -53,7 +53,10 @@ describe("NodePalette", () => {
     expect(nodes).toHaveLength(1);
     expect(nodes[0]).toMatchObject({
       type: "trigger",
-      data: { label: "New Trigger", config: { event: "customer.created" } },
+      data: {
+        label: "New Trigger",
+        config: { kind: "event", event: "customer.created" },
+      },
     });
   });
 

@@ -55,6 +55,7 @@ function createDefaultNodeInput(type: NodeType, label: string): NewNodeInput {
   switch (type) {
     case "trigger": {
       const config: TriggerConfig = {
+        kind: "event",
         event: "customer.created",
       };
 
@@ -67,7 +68,7 @@ function createDefaultNodeInput(type: NodeType, label: string): NewNodeInput {
 
     case "action": {
       const config: ActionConfig = {
-        action: "send_email",
+        kind: "send_email",
       };
 
       return {

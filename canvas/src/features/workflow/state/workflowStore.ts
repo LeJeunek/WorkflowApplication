@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { isActionConfig, isConditionConfig, isTriggerConfig } from "../domain/config";
 import { canConnect } from "../domain/graph";
 import type {
   ActionConfig,
@@ -182,6 +183,7 @@ const INITIAL_WORKFLOW: Workflow = {
         label: "New Customer",
         description: "Runs when a customer is created",
         config: {
+          kind: "event",
           event: "customer.created",
         },
       },
@@ -370,44 +372,19 @@ export const useWorkflowStore = create<WorkflowStore>()((set) => ({
 
           switch (node.type) {
             case "trigger":
-              if ("event" in config) {
-                return {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    config,
-                  },
-                };
-              }
-              return node;
+              return isTriggerConfig(config)
+                ? { ...node, data: { ...node.data, config } }
+                : node;
 
             case "action":
-              if ("action" in config) {
-                return {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    config,
-                  },
-                };
-              }
-              return node;
+              return isActionConfig(config)
+                ? { ...node, data: { ...node.data, config } }
+                : node;
 
             case "condition":
-              if (
-                "field" in config &&
-                "operator" in config &&
-                "value" in config
-              ) {
-                return {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    config,
-                  },
-                };
-              }
-              return node;
+              return isConditionConfig(config)
+                ? { ...node, data: { ...node.data, config } }
+                : node;
           }
         }),
 

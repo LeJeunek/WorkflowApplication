@@ -28,14 +28,31 @@ export interface NodePosition {
 }
 
 /** Configuration specific to each node type. */
-export interface TriggerConfig {
-  event: string;
-}
+export type TriggerConfig =
+  | { kind: "event"; event: string }
+  | { kind: "schedule"; cron: string };
 
-export interface ActionConfig {
-  action: string;
-  recipient?: string;
-}
+/** Every {@link TriggerConfig} variant, keyed by its `kind` tag. */
+export type TriggerConfigKind = TriggerConfig["kind"];
+
+/** Every value {@link TriggerConfigKind} allows, in display order. */
+export const TRIGGER_CONFIG_KINDS: readonly TriggerConfigKind[] = [
+  "event",
+  "schedule",
+];
+
+export type ActionConfig =
+  | { kind: "send_email"; recipient?: string }
+  | { kind: "http_request"; url: string; method: "GET" | "POST" };
+
+/** Every {@link ActionConfig} variant, keyed by its `kind` tag. */
+export type ActionConfigKind = ActionConfig["kind"];
+
+/** Every value {@link ActionConfigKind} allows, in display order. */
+export const ACTION_CONFIG_KINDS: readonly ActionConfigKind[] = [
+  "send_email",
+  "http_request",
+];
 
 /** The comparisons a Condition node's branch can test for. */
 export type ConditionOperator =
@@ -64,10 +81,7 @@ export interface ConditionConfig {
 export type ConditionBranch = "true" | "false";
 
 /** Every value {@link ConditionBranch} allows, in display order. */
-export const CONDITION_BRANCHES: readonly ConditionBranch[] = [
-  "true",
-  "false",
-];
+export const CONDITION_BRANCHES: readonly ConditionBranch[] = ["true", "false"];
 
 export interface TriggerNode {
   id: WorkflowNodeId;

@@ -8,13 +8,13 @@ const NODES: Workflow["nodes"] = [
     id: "A",
     type: "trigger",
     position: { x: 0, y: 0 },
-    data: { label: "A", config: { event: "test" } },
+    data: { label: "A", config: { kind: "event", event: "test" } },
   },
   {
     id: "B",
     type: "action",
     position: { x: 100, y: 0 },
-    data: { label: "B", config: { action: "test" } },
+    data: { label: "B", config: { kind: "send_email" } },
   },
   {
     id: "C",

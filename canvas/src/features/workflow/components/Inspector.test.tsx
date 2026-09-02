@@ -14,13 +14,16 @@ const BASE_WORKFLOW: Workflow = {
       id: "trigger-1",
       type: "trigger" as const,
       position: { x: 0, y: 0 },
-      data: { label: "Trigger A", config: { event: "customer.created" } },
+      data: {
+        label: "Trigger A",
+        config: { kind: "event" as const, event: "customer.created" },
+      },
     },
     {
       id: "action-1",
       type: "action" as const,
       position: { x: 100, y: 0 },
-      data: { label: "Action A", config: { action: "send_email" } },
+      data: { label: "Action A", config: { kind: "send_email" as const } },
     },
     {
       id: "condition-1",
@@ -83,12 +86,15 @@ describe("Inspector", () => {
       useWorkflowStore
         .getState()
         .workflow.nodes.find((node) => node.id === "trigger-1")?.data.config,
-    ).toEqual({ event: "customer.updated" });
+    ).toEqual({ kind: "event", event: "customer.updated" });
   });
 
-  it("shows and edits the action's Action and Recipient fields, including an empty recipient", () => {
+  it("shows and edits the action's Recipient field for the default Send email kind", () => {
     useWorkflowStore.setState({ selectedNodeId: "action-1" });
     render(<Inspector />);
+
+    const kind = screen.getByLabelText("Kind") as HTMLSelectElement;
+    expect(kind.value).toBe("send_email");
 
     const recipient = screen.getByLabelText("Recipient") as HTMLInputElement;
     expect(recipient.value).toBe("");
@@ -99,8 +105,36 @@ describe("Inspector", () => {
       .getState()
       .workflow.nodes.find((node) => node.id === "action-1");
     expect(nodeAfter?.data.config).toEqual({
-      action: "send_email",
+      kind: "send_email",
       recipient: "ops@example.com",
+    });
+  });
+
+  it("switching the action's Kind to HTTP request replaces the config and shows URL and Method", () => {
+    useWorkflowStore.setState({ selectedNodeId: "action-1" });
+    render(<Inspector />);
+
+    const kind = screen.getByLabelText("Kind") as HTMLSelectElement;
+    fireEvent.change(kind, { target: { value: "http_request" } });
+
+    expect(screen.queryByLabelText("Recipient")).toBeNull();
+
+    const url = screen.getByLabelText("URL") as HTMLInputElement;
+    const method = screen.getByLabelText("Method") as HTMLSelectElement;
+    expect(url.value).toBe("");
+    expect(method.value).toBe("GET");
+
+    fireEvent.change(url, { target: { value: "https://example.com/hook" } });
+    fireEvent.change(method, { target: { value: "POST" } });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "action-1")?.data.config,
+    ).toEqual({
+      kind: "http_request",
+      url: "https://example.com/hook",
+      method: "POST",
     });
   });
 
@@ -130,7 +164,7 @@ describe("Inspector", () => {
 
     expect(screen.getByLabelText("Label")).toHaveProperty("value", "Action A");
     expect(screen.queryByLabelText("Event")).toBeNull();
-    expect(screen.getByLabelText("Action")).toBeDefined();
+    expect(screen.getByLabelText("Recipient")).toBeDefined();
   });
 
   it("shows the empty state when the selected id has no matching node", () => {
