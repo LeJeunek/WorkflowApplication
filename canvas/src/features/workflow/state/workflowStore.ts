@@ -1,7 +1,13 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 import { isActionConfig, isConditionConfig, isTriggerConfig } from "../domain/config";
 import { canConnect } from "../domain/graph";
+import {
+  PERSISTENCE_KEY,
+  PERSISTENCE_VERSION,
+  workflowStorage,
+} from "./persistence";
 import type {
   ActionConfig,
   ConditionBranch,
@@ -196,233 +202,244 @@ const INITIAL_WORKFLOW: Workflow = {
   updatedAt: SEED_TIMESTAMP,
 };
 
-export const useWorkflowStore = create<WorkflowStore>()((set) => ({
-  workflow: INITIAL_WORKFLOW,
+export const useWorkflowStore = create<WorkflowStore>()(
+  persist(
+    (set) => ({
+    workflow: INITIAL_WORKFLOW,
 
-  selectedNodeId: null,
+    selectedNodeId: null,
 
-  setSelectedNodeId: (id) =>
-    set({
-      selectedNodeId: id,
-    }),
+    setSelectedNodeId: (id) =>
+      set({
+        selectedNodeId: id,
+      }),
 
-  addNode: (input) =>
-    set((state) => {
-      const position =
-        input.position ??
-        nextPosition(
-          state.workflow.nodes,
-          snapToGrid(input.origin ?? FLOW_ORIGIN),
-        );
+    addNode: (input) =>
+      set((state) => {
+        const position =
+          input.position ??
+          nextPosition(
+            state.workflow.nodes,
+            snapToGrid(input.origin ?? FLOW_ORIGIN),
+          );
 
-      const id = crypto.randomUUID();
+        const id = crypto.randomUUID();
 
-      const node: WorkflowNode =
-        input.type === "trigger"
-          ? {
-              id,
-              type: "trigger",
-              position,
-              data: {
-                label: input.label,
-                config: input.config,
-              },
-            }
-          : input.type === "action"
+        const node: WorkflowNode =
+          input.type === "trigger"
             ? {
                 id,
-                type: "action",
+                type: "trigger",
                 position,
                 data: {
                   label: input.label,
                   config: input.config,
                 },
               }
-            : {
-                id,
-                type: "condition",
-                position,
-                data: {
-                  label: input.label,
-                  config: input.config,
-                },
-              };
+            : input.type === "action"
+              ? {
+                  id,
+                  type: "action",
+                  position,
+                  data: {
+                    label: input.label,
+                    config: input.config,
+                  },
+                }
+              : {
+                  id,
+                  type: "condition",
+                  position,
+                  data: {
+                    label: input.label,
+                    config: input.config,
+                  },
+                };
 
-      return {
+        return {
+          workflow: {
+            ...state.workflow,
+            nodes: [...state.workflow.nodes, node],
+            updatedAt: now(),
+          },
+        };
+      }),
+
+    moveNode: (id, position) =>
+      set((state) => ({
         workflow: {
           ...state.workflow,
-          nodes: [...state.workflow.nodes, node],
+
+          nodes: state.workflow.nodes.map((node) =>
+            node.id === id
+              ? {
+                  ...node,
+                  position,
+                }
+              : node,
+          ),
+
           updatedAt: now(),
         },
-      };
-    }),
+      })),
 
-  moveNode: (id, position) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
+    connectNodes: (source, target, sourceHandle) =>
+      set((state) => {
+        if (
+          !canConnect(
+            state.workflow.nodes,
+            state.workflow.edges,
+            source,
+            target,
+            sourceHandle,
+          )
+        ) {
+          return state;
+        }
 
-        nodes: state.workflow.nodes.map((node) =>
-          node.id === id
-            ? {
-                ...node,
-                position,
-              }
-            : node,
-        ),
-
-        updatedAt: now(),
-      },
-    })),
-
-  connectNodes: (source, target, sourceHandle) =>
-    set((state) => {
-      if (
-        !canConnect(
-          state.workflow.nodes,
-          state.workflow.edges,
+        const edge: WorkflowEdge = {
+          id: crypto.randomUUID(),
           source,
           target,
-          sourceHandle,
-        )
-      ) {
-        return state;
-      }
+          // Spread conditionally so unbranched edges have no `sourceHandle`
+          // key at all, rather than an explicit `undefined`.
+          ...(sourceHandle ? { sourceHandle } : {}),
+        };
 
-      const edge: WorkflowEdge = {
-        id: crypto.randomUUID(),
-        source,
-        target,
-        // Spread conditionally so unbranched edges have no `sourceHandle`
-        // key at all, rather than an explicit `undefined`.
-        ...(sourceHandle ? { sourceHandle } : {}),
-      };
+        return {
+          workflow: {
+            ...state.workflow,
+            edges: [...state.workflow.edges, edge],
+            updatedAt: now(),
+          },
+        };
+      }),
 
-      return {
+    updateNode: (id, input) =>
+      set((state) => ({
         workflow: {
           ...state.workflow,
-          edges: [...state.workflow.edges, edge],
+
+          nodes: state.workflow.nodes.map((node) => {
+            if (node.id !== id) {
+              return node;
+            }
+
+            switch (node.type) {
+              case "trigger":
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...(input.label !== undefined ? { label: input.label } : {}),
+                    ...(input.description !== undefined
+                      ? { description: input.description }
+                      : {}),
+                  },
+                };
+
+              case "action":
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...(input.label !== undefined ? { label: input.label } : {}),
+                    ...(input.description !== undefined
+                      ? { description: input.description }
+                      : {}),
+                  },
+                };
+
+              case "condition":
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...(input.label !== undefined ? { label: input.label } : {}),
+                    ...(input.description !== undefined
+                      ? { description: input.description }
+                      : {}),
+                  },
+                };
+            }
+          }),
+
           updatedAt: now(),
         },
-      };
+      })),
+
+    updateNodeConfig: (id, config) =>
+      set((state) => ({
+        workflow: {
+          ...state.workflow,
+
+          nodes: state.workflow.nodes.map((node) => {
+            if (node.id !== id) {
+              return node;
+            }
+
+            switch (node.type) {
+              case "trigger":
+                return isTriggerConfig(config)
+                  ? { ...node, data: { ...node.data, config } }
+                  : node;
+
+              case "action":
+                return isActionConfig(config)
+                  ? { ...node, data: { ...node.data, config } }
+                  : node;
+
+              case "condition":
+                return isConditionConfig(config)
+                  ? { ...node, data: { ...node.data, config } }
+                  : node;
+            }
+          }),
+
+          updatedAt: now(),
+        },
+      })),
+    deleteNode: (id) =>
+      set((state) => ({
+        workflow: {
+          ...state.workflow,
+
+          nodes: state.workflow.nodes.filter((node) => node.id !== id),
+
+          edges: state.workflow.edges.filter(
+            (edge) => edge.source !== id && edge.target !== id,
+          ),
+
+          updatedAt: now(),
+        },
+
+        selectedNodeId: state.selectedNodeId === id ? null : state.selectedNodeId,
+      })),
+
+    deleteEdge: (id) =>
+      set((state) => ({
+        workflow: {
+          ...state.workflow,
+          edges: state.workflow.edges.filter((edge) => edge.id !== id),
+          updatedAt: now(),
+        },
+      })),
+
+    renameWorkflow: (name) =>
+      set((state) => ({
+        workflow: {
+          ...state.workflow,
+          name,
+          updatedAt: now(),
+        },
+      })),
     }),
-
-  updateNode: (id, input) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
-
-        nodes: state.workflow.nodes.map((node) => {
-          if (node.id !== id) {
-            return node;
-          }
-
-          switch (node.type) {
-            case "trigger":
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  ...(input.label !== undefined ? { label: input.label } : {}),
-                  ...(input.description !== undefined
-                    ? { description: input.description }
-                    : {}),
-                },
-              };
-
-            case "action":
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  ...(input.label !== undefined ? { label: input.label } : {}),
-                  ...(input.description !== undefined
-                    ? { description: input.description }
-                    : {}),
-                },
-              };
-
-            case "condition":
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  ...(input.label !== undefined ? { label: input.label } : {}),
-                  ...(input.description !== undefined
-                    ? { description: input.description }
-                    : {}),
-                },
-              };
-          }
-        }),
-
-        updatedAt: now(),
-      },
-    })),
-
-  updateNodeConfig: (id, config) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
-
-        nodes: state.workflow.nodes.map((node) => {
-          if (node.id !== id) {
-            return node;
-          }
-
-          switch (node.type) {
-            case "trigger":
-              return isTriggerConfig(config)
-                ? { ...node, data: { ...node.data, config } }
-                : node;
-
-            case "action":
-              return isActionConfig(config)
-                ? { ...node, data: { ...node.data, config } }
-                : node;
-
-            case "condition":
-              return isConditionConfig(config)
-                ? { ...node, data: { ...node.data, config } }
-                : node;
-          }
-        }),
-
-        updatedAt: now(),
-      },
-    })),
-  deleteNode: (id) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
-
-        nodes: state.workflow.nodes.filter((node) => node.id !== id),
-
-        edges: state.workflow.edges.filter(
-          (edge) => edge.source !== id && edge.target !== id,
-        ),
-
-        updatedAt: now(),
-      },
-
-      selectedNodeId: state.selectedNodeId === id ? null : state.selectedNodeId,
-    })),
-
-  deleteEdge: (id) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
-        edges: state.workflow.edges.filter((edge) => edge.id !== id),
-        updatedAt: now(),
-      },
-    })),
-
-  renameWorkflow: (name) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
-        name,
-        updatedAt: now(),
-      },
-    })),
-}));
+    {
+      name: PERSISTENCE_KEY,
+      version: PERSISTENCE_VERSION,
+      storage: workflowStorage,
+      // selectedNodeId is ephemeral UI state, not part of the saved document.
+      partialize: (state) => ({ workflow: state.workflow }),
+    },
+  ),
+);

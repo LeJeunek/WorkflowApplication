@@ -312,3 +312,23 @@ test("a node added from the palette can immediately be used as a connection sour
 
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 });
+
+test("a renamed workflow and an added node survive a page reload", async ({
+  page,
+}) => {
+  await page.getByLabel("Workflow name").fill("Reload Survives");
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+
+  await page.reload();
+
+  // Re-establish the same "app has finished mounting" signal the top-level
+  // beforeEach uses -- a reload tears down and remounts the whole page.
+  await expect(page.locator('[data-id="trigger-new-customer"]')).toBeVisible();
+
+  await expect(page.getByLabel("Workflow name")).toHaveValue(
+    "Reload Survives",
+  );
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+  await expect(page.getByText("New Action")).toBeVisible();
+});

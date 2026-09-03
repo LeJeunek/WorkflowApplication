@@ -1,11 +1,31 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * The store's persistence uses the real browser `localStorage`, which
+ * Vitest's default node environment does not provide (Node itself doesn't
+ * expose it as a global either). jsdom implements the actual Storage API,
+ * so the persistence tests below exercise the same code path production
+ * runs through, rather than a hand-rolled stand-in.
+ */
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { PERSISTENCE_KEY, PERSISTENCE_VERSION } from "./persistence";
 import {
   COLUMN_SPACING,
   NODES_PER_ROW,
   ROW_SPACING,
   useWorkflowStore,
 } from "./workflowStore";
+import type { Workflow } from "../types";
+
+// Every test in this file resets `workflow` explicitly via its own
+// `beforeEach`, so a stale localStorage entry can't change what any single
+// test observes -- but clearing it up front keeps the persistence
+// describe block below from ever reading a leftover value written by a
+// previous test file sharing this worker.
+beforeEach(() => {
+  localStorage.clear();
+});
 
 // Testing the connectNodes function in the workflowStore
 
@@ -870,5 +890,67 @@ describe("renameWorkflow", () => {
     const after = useWorkflowStore.getState().workflow;
     expect(after.nodes).toEqual(before.nodes);
     expect(after.edges).toEqual(before.edges);
+  });
+});
+
+describe("persistence", () => {
+  beforeEach(() => {
+    useWorkflowStore.setState({
+      workflow: {
+        id: "test-workflow",
+        name: "Test Workflow",
+        nodes: [],
+        edges: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      selectedNodeId: null,
+    });
+  });
+
+  function readPersistedValue(): { state: { workflow: Workflow; selectedNodeId?: unknown }; version: number } {
+    const raw = localStorage.getItem(PERSISTENCE_KEY);
+    if (raw === null) {
+      throw new Error(`Nothing persisted under "${PERSISTENCE_KEY}"`);
+    }
+    return JSON.parse(raw);
+  }
+
+  it("persists a change under the configured key and version", () => {
+    useWorkflowStore.getState().renameWorkflow("Persisted Name");
+
+    const persisted = readPersistedValue();
+    expect(persisted.version).toBe(PERSISTENCE_VERSION);
+    expect(persisted.state.workflow.name).toBe("Persisted Name");
+  });
+
+  it("does not persist selectedNodeId, which is ephemeral UI state", () => {
+    useWorkflowStore.getState().setSelectedNodeId("some-node");
+
+    const persisted = readPersistedValue();
+    expect(persisted.state.selectedNodeId).toBeUndefined();
+    expect(useWorkflowStore.getState().selectedNodeId).toBe("some-node");
+  });
+
+  it("rehydrates the store from a previously persisted workflow", async () => {
+    const persistedWorkflow: Workflow = {
+      id: "from-storage",
+      name: "Loaded From Storage",
+      nodes: [],
+      edges: [],
+      createdAt: "2026-02-01T00:00:00.000Z",
+      updatedAt: "2026-02-01T00:00:00.000Z",
+    };
+    localStorage.setItem(
+      PERSISTENCE_KEY,
+      JSON.stringify({
+        state: { workflow: persistedWorkflow },
+        version: PERSISTENCE_VERSION,
+      }),
+    );
+
+    await useWorkflowStore.persist.rehydrate();
+
+    expect(useWorkflowStore.getState().workflow).toEqual(persistedWorkflow);
   });
 });

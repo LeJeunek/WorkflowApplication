@@ -1,0 +1,36 @@
+// Not yet wired to a running app. This project currently has no server --
+// it's a Vite SPA that persists to the browser's localStorage (see
+// src/features/workflow/state/persistence.ts). This schema exists so a
+// future Postgres-backed persistence layer has a concrete target to build
+// against, rather than inventing the shape from scratch at that point.
+//
+// `nodes`/`edges` are stored as JSON, mirroring the client's `Workflow`
+// domain type (src/features/workflow/types.ts) exactly -- a normalized
+// relational schema (separate WorkflowNode/WorkflowEdge tables) is a
+// bigger, separate design decision this file deliberately doesn't make.
+//
+// To activate:
+//   npm install -D prisma
+//   npm install @prisma/client
+//   npx prisma migrate dev --name init
+// (requires a DATABASE_URL pointing at a real Postgres instance, and a
+// server to run Prisma Client from -- it cannot run in the browser bundle.)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workflow {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  nodes       Json
+  edges       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
