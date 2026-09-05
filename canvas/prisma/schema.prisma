@@ -13,8 +13,18 @@
 //   npm install -D prisma
 //   npm install @prisma/client
 //   npx prisma migrate dev --name init
-// (requires a DATABASE_URL pointing at a real Postgres instance, and a
-// server to run Prisma Client from -- it cannot run in the browser bundle.)
+// (requires DATABASE_URL, and for running migrations specifically
+// DATABASE_URL_UNPOOLED too -- see .env.example, confirmed against a real
+// Neon project's actual dashboard output -- plus a server to run Prisma
+// Client from; it cannot run in the browser bundle.)
+//
+// NOTE: Prisma isn't installed in this project, so the exact mechanics
+// below haven't been verified against a real CLI. This project's own
+// editor tooling flags `url`/`directUrl` in `datasource` as moved to a
+// separate prisma.config.ts in newer Prisma versions -- if that's still
+// true when this is actually activated, `npx prisma init` (run against
+// whatever version gets installed then) will scaffold the current
+// convention correctly; trust that output over this comment.
 
 generator client {
   provider = "prisma-client-js"

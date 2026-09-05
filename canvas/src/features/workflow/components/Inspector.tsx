@@ -1,5 +1,6 @@
 import { SlidersHorizontal } from "lucide-react";
 
+import { isSamplePayloadValid } from "../domain/execution";
 import { useWorkflowStore } from "../state/workflowStore";
 import { ACTION_CONFIG_KINDS, CONDITION_OPERATORS, TRIGGER_CONFIG_KINDS } from "../types";
 import type {
@@ -35,11 +36,14 @@ const CONDITION_OPERATOR_LABELS: Record<ConditionOperator, string> = {
 const TRIGGER_CONFIG_KIND_LABELS: Record<TriggerConfigKind, string> = {
   event: "Event",
   schedule: "Schedule",
+  form_submission: "Form submission",
 };
 
 const ACTION_CONFIG_KIND_LABELS: Record<ActionConfigKind, string> = {
   send_email: "Send email",
   http_request: "HTTP request",
+  add_tag: "Add tag",
+  slack_message: "Slack message",
 };
 
 /**
@@ -47,27 +51,33 @@ const ACTION_CONFIG_KIND_LABELS: Record<ActionConfigKind, string> = {
  * variant's fields rather than trying to preserve them -- there is no
  * meaningful mapping from, say, a schedule's `cron` onto an event's `event`,
  * and `updateNodeConfig` already replaces wholesale rather than merging.
+ *
+ * Returns the full union type rather than spelling it out inline: a
+ * spelled-out return type has to be edited by hand every time a kind is
+ * added (as just happened going from 2 to 3/4 kinds), where `TriggerConfig`
+ * already grows on its own.
  */
-function defaultTriggerConfig(kind: TriggerConfigKind): {
-  kind: "event";
-  event: string;
-} | { kind: "schedule"; cron: string } {
+function defaultTriggerConfig(kind: TriggerConfigKind): TriggerConfig {
   switch (kind) {
     case "event":
       return { kind: "event", event: "" };
     case "schedule":
       return { kind: "schedule", cron: "" };
+    case "form_submission":
+      return { kind: "form_submission", formName: "" };
   }
 }
 
-function defaultActionConfig(kind: ActionConfigKind):
-  | { kind: "send_email"; recipient?: string }
-  | { kind: "http_request"; url: string; method: "GET" | "POST" } {
+function defaultActionConfig(kind: ActionConfigKind): ActionConfig {
   switch (kind) {
     case "send_email":
       return { kind: "send_email" };
     case "http_request":
       return { kind: "http_request", url: "", method: "GET" };
+    case "add_tag":
+      return { kind: "add_tag", tag: "" };
+    case "slack_message":
+      return { kind: "slack_message", channel: "", message: "" };
   }
 }
 
@@ -90,8 +100,12 @@ function TriggerConfigFields({
   config: TriggerConfig;
   onChange: (config: TriggerConfig) => void;
 }) {
-  if (config.kind === "event") {
-    return (
+  // Every trigger kind carries samplePayload (see the TriggerConfig doc
+  // comment in types.ts), so spreading ...config rather than writing a
+  // fresh literal here matters: a literal would silently drop whatever the
+  // Sample payload field below already holds every time this field changes.
+  const kindField =
+    config.kind === "event" ? (
       <label className="block">
         <span className="mb-1 block text-xs text-ink-faint">Event</span>
 
@@ -99,29 +113,71 @@ function TriggerConfigFields({
           type="text"
           value={config.event}
           onChange={(event) =>
-            onChange({ kind: "event", event: event.target.value })
+            onChange({ ...config, event: event.target.value })
+          }
+          className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+        />
+      </label>
+    ) : config.kind === "schedule" ? (
+      <label className="block">
+        <span className="mb-1 block text-xs text-ink-faint">
+          Cron expression
+        </span>
+
+        <input
+          type="text"
+          value={config.cron}
+          onChange={(event) =>
+            onChange({ ...config, cron: event.target.value })
+          }
+          className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+        />
+      </label>
+    ) : (
+      <label className="block">
+        <span className="mb-1 block text-xs text-ink-faint">Form name</span>
+
+        <input
+          type="text"
+          value={config.formName}
+          onChange={(event) =>
+            onChange({ ...config, formName: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
       </label>
     );
-  }
+
+  const samplePayloadValid = isSamplePayloadValid(config.samplePayload);
 
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs text-ink-faint">
-        Cron expression
-      </span>
+    <>
+      {kindField}
 
-      <input
-        type="text"
-        value={config.cron}
-        onChange={(event) =>
-          onChange({ kind: "schedule", cron: event.target.value })
-        }
-        className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-      />
-    </label>
+      <label className="block">
+        <span className="mb-1 block text-xs text-ink-faint">
+          Sample payload
+        </span>
+
+        <textarea
+          aria-invalid={!samplePayloadValid}
+          value={config.samplePayload ?? ""}
+          onChange={(event) =>
+            onChange({ ...config, samplePayload: event.target.value })
+          }
+          rows={4}
+          spellCheck={false}
+          className="w-full resize-none rounded-md border border-line bg-elevated px-2 py-1.5 font-mono text-xs leading-relaxed text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+        />
+
+        {!samplePayloadValid && (
+          <p className="mt-1 text-[11px] text-danger">
+            Invalid JSON -- Run will use an empty payload until this is
+            fixed.
+          </p>
+        )}
+      </label>
+    </>
   );
 }
 
@@ -142,7 +198,61 @@ function ActionConfigFields({
           type="text"
           value={config.recipient ?? ""}
           onChange={(event) =>
-            onChange({ kind: "send_email", recipient: event.target.value })
+            onChange({ ...config, recipient: event.target.value })
+          }
+          className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+        />
+      </label>
+    );
+  }
+
+  if (config.kind === "http_request") {
+    return (
+      <>
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-faint">URL</span>
+
+          <input
+            type="text"
+            value={config.url}
+            onChange={(event) =>
+              onChange({ ...config, url: event.target.value })
+            }
+            className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-faint">Method</span>
+
+          <select
+            value={config.method}
+            onChange={(event) =>
+              onChange({
+                ...config,
+                method: event.target.value as "GET" | "POST",
+              })
+            }
+            className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+          >
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+          </select>
+        </label>
+      </>
+    );
+  }
+
+  if (config.kind === "add_tag") {
+    return (
+      <label className="block">
+        <span className="mb-1 block text-xs text-ink-faint">Tag</span>
+
+        <input
+          type="text"
+          value={config.tag}
+          onChange={(event) =>
+            onChange({ ...config, tag: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
@@ -153,34 +263,29 @@ function ActionConfigFields({
   return (
     <>
       <label className="block">
-        <span className="mb-1 block text-xs text-ink-faint">URL</span>
+        <span className="mb-1 block text-xs text-ink-faint">Channel</span>
 
         <input
           type="text"
-          value={config.url}
+          value={config.channel}
           onChange={(event) =>
-            onChange({ ...config, url: event.target.value })
+            onChange({ ...config, channel: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
       </label>
 
       <label className="block">
-        <span className="mb-1 block text-xs text-ink-faint">Method</span>
+        <span className="mb-1 block text-xs text-ink-faint">Message</span>
 
-        <select
-          value={config.method}
+        <input
+          type="text"
+          value={config.message}
           onChange={(event) =>
-            onChange({
-              ...config,
-              method: event.target.value as "GET" | "POST",
-            })
+            onChange({ ...config, message: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-        >
-          <option value="GET">GET</option>
-          <option value="POST">POST</option>
-        </select>
+        />
       </label>
     </>
   );

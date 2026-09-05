@@ -57,6 +57,15 @@ function createDefaultNodeInput(type: NodeType, label: string): NewNodeInput {
       const config: TriggerConfig = {
         kind: "event",
         event: "customer.created",
+        // A plausible starting point for testing conditions against, not a
+        // meaningful default -- matches `event` in shape so a downstream
+        // condition on e.g. "customer.plan" has something to evaluate the
+        // moment the node exists, rather than an empty payload.
+        samplePayload: JSON.stringify(
+          { customer: { id: "123", plan: "pro" } },
+          null,
+          2,
+        ),
       };
 
       return {

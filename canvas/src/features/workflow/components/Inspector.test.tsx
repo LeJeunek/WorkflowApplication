@@ -89,6 +89,95 @@ describe("Inspector", () => {
     ).toEqual({ kind: "event", event: "customer.updated" });
   });
 
+  it("shows and edits the trigger's Sample payload field", () => {
+    useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
+    render(<Inspector />);
+
+    const samplePayload = screen.getByLabelText(
+      "Sample payload",
+    ) as HTMLTextAreaElement;
+    expect(samplePayload.value).toBe("");
+
+    fireEvent.change(samplePayload, {
+      target: { value: '{"plan": "pro"}' },
+    });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "trigger-1")?.data.config,
+    ).toEqual({
+      kind: "event",
+      event: "customer.created",
+      samplePayload: '{"plan": "pro"}',
+    });
+  });
+
+  it("editing Event does not clobber an existing Sample payload", () => {
+    useWorkflowStore.setState({
+      workflow: {
+        ...BASE_WORKFLOW,
+        nodes: BASE_WORKFLOW.nodes.map((node) =>
+          node.id === "trigger-1" && node.type === "trigger"
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  config: {
+                    kind: "event" as const,
+                    event: "customer.created",
+                    samplePayload: '{"plan": "pro"}',
+                  },
+                },
+              }
+            : node,
+        ),
+      },
+      selectedNodeId: "trigger-1",
+    });
+    render(<Inspector />);
+
+    fireEvent.change(screen.getByLabelText("Event"), {
+      target: { value: "customer.updated" },
+    });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "trigger-1")?.data.config,
+    ).toEqual({
+      kind: "event",
+      event: "customer.updated",
+      samplePayload: '{"plan": "pro"}',
+    });
+  });
+
+  it("shows an inline error for invalid JSON in Sample payload, and clears it once fixed", () => {
+    useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
+    render(<Inspector />);
+
+    expect(screen.queryByText(/invalid json/i)).toBeNull();
+
+    const samplePayload = screen.getByLabelText("Sample payload");
+    fireEvent.change(samplePayload, { target: { value: "{not valid" } });
+    expect(screen.getByText(/invalid json/i)).toBeDefined();
+
+    fireEvent.change(samplePayload, { target: { value: '{"plan": "pro"}' } });
+    expect(screen.queryByText(/invalid json/i)).toBeNull();
+  });
+
+  it("does not show an invalid-JSON error when Sample payload is cleared to empty", () => {
+    useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
+    render(<Inspector />);
+
+    const samplePayload = screen.getByLabelText("Sample payload");
+    fireEvent.change(samplePayload, { target: { value: "{not valid" } });
+    expect(screen.getByText(/invalid json/i)).toBeDefined();
+
+    fireEvent.change(samplePayload, { target: { value: "" } });
+    expect(screen.queryByText(/invalid json/i)).toBeNull();
+  });
+
   it("shows and edits the action's Recipient field for the default Send email kind", () => {
     useWorkflowStore.setState({ selectedNodeId: "action-1" });
     render(<Inspector />);
@@ -136,6 +225,73 @@ describe("Inspector", () => {
       url: "https://example.com/hook",
       method: "POST",
     });
+  });
+
+  it("switching the action's Kind to Add tag shows the Tag field", () => {
+    useWorkflowStore.setState({ selectedNodeId: "action-1" });
+    render(<Inspector />);
+
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "add_tag" },
+    });
+
+    const tag = screen.getByLabelText("Tag") as HTMLInputElement;
+    expect(tag.value).toBe("");
+
+    fireEvent.change(tag, { target: { value: "vip" } });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "action-1")?.data.config,
+    ).toEqual({ kind: "add_tag", tag: "vip" });
+  });
+
+  it("switching the action's Kind to Slack message shows Channel and Message, and editing one preserves the other", () => {
+    useWorkflowStore.setState({ selectedNodeId: "action-1" });
+    render(<Inspector />);
+
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "slack_message" },
+    });
+
+    const channel = screen.getByLabelText("Channel") as HTMLInputElement;
+    const message = screen.getByLabelText("Message") as HTMLInputElement;
+
+    fireEvent.change(channel, { target: { value: "#general" } });
+    fireEvent.change(message, { target: { value: "Deploy finished" } });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "action-1")?.data.config,
+    ).toEqual({
+      kind: "slack_message",
+      channel: "#general",
+      message: "Deploy finished",
+    });
+  });
+
+  it("switching the trigger's Kind to Form submission shows the Form name field", () => {
+    useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
+    render(<Inspector />);
+
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "form_submission" },
+    });
+
+    expect(screen.queryByLabelText("Event")).toBeNull();
+
+    const formName = screen.getByLabelText("Form name") as HTMLInputElement;
+    expect(formName.value).toBe("");
+
+    fireEvent.change(formName, { target: { value: "Signup" } });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "trigger-1")?.data.config,
+    ).toEqual({ kind: "form_submission", formName: "Signup" });
   });
 
   it("shows and edits the condition's Field, Operator, and Value fields", () => {

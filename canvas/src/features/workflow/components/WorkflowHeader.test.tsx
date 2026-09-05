@@ -15,8 +15,24 @@ const EMPTY_WORKFLOW: Workflow = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+const WORKFLOW_WITH_TRIGGER: Workflow = {
+  ...EMPTY_WORKFLOW,
+  nodes: [
+    {
+      id: "trigger-1",
+      type: "trigger",
+      position: { x: 0, y: 0 },
+      data: { label: "A", config: { kind: "event", event: "test" } },
+    },
+  ],
+};
+
 beforeEach(() => {
-  useWorkflowStore.setState({ workflow: EMPTY_WORKFLOW, selectedNodeId: null });
+  useWorkflowStore.setState({
+    workflow: EMPTY_WORKFLOW,
+    selectedNodeId: null,
+    lastRun: null,
+  });
 });
 
 afterEach(cleanup);
@@ -42,5 +58,33 @@ describe("WorkflowHeader", () => {
     expect(
       (screen.getByLabelText("Workflow name") as HTMLInputElement).value,
     ).toBe("Renamed Workflow");
+  });
+
+  it("disables the Run button when the workflow has no trigger", () => {
+    render(<WorkflowHeader />);
+
+    expect(
+      screen.getByRole("button", { name: "Run workflow" }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("enables the Run button once a trigger exists", () => {
+    useWorkflowStore.setState({ workflow: WORKFLOW_WITH_TRIGGER });
+    render(<WorkflowHeader />);
+
+    expect(
+      screen.getByRole("button", { name: "Run workflow" }),
+    ).toHaveProperty("disabled", false);
+  });
+
+  it("clicking Run populates lastRun", () => {
+    useWorkflowStore.setState({ workflow: WORKFLOW_WITH_TRIGGER });
+    render(<WorkflowHeader />);
+
+    expect(useWorkflowStore.getState().lastRun).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
+
+    expect(useWorkflowStore.getState().lastRun).not.toBeNull();
   });
 });

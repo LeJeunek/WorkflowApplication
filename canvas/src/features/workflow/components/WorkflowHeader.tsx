@@ -9,6 +9,13 @@ import { useWorkflowStore } from '../state/workflowStore';
 export function WorkflowHeader() {
   const name = useWorkflowStore((state) => state.workflow.name);
   const renameWorkflow = useWorkflowStore((state) => state.renameWorkflow);
+  const runWorkflow = useWorkflowStore((state) => state.runWorkflow);
+  // A plain boolean, not a derived array -- keeps this selector from
+  // triggering a re-render on every workflow change that doesn't actually
+  // add or remove a trigger.
+  const hasTrigger = useWorkflowStore((state) =>
+    state.workflow.nodes.some((node) => node.type === "trigger"),
+  );
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
@@ -40,7 +47,9 @@ export function WorkflowHeader() {
       <button
         type="button"
         aria-label="Run workflow"
-        className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        disabled={!hasTrigger}
+        onClick={() => runWorkflow()}
+        className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
       >
         <Play className="size-3.5 fill-current" aria-hidden="true" />
         Run

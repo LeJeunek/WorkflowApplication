@@ -332,3 +332,50 @@ test("a renamed workflow and an added node survive a page reload", async ({
   await expect(page.locator(".react-flow__node")).toHaveCount(2);
   await expect(page.getByText("New Action")).toBeVisible();
 });
+
+test("Run evaluates the seed trigger's sample payload and badges the right branch", async ({
+  page,
+}) => {
+  // The seed trigger already carries { customer: { plan: "pro", ... } } as
+  // its sample payload -- see workflowStore.ts's INITIAL_WORKFLOW.
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(4);
+  await page.waitForTimeout(500);
+
+  await page.locator(".react-flow__node-condition").click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await inspector.getByLabel("Field").fill("customer.plan");
+  await inspector.getByLabel("Value").fill("pro");
+
+  const actions = page.locator(".react-flow__node-action");
+  const trueAction = actions.nth(0);
+  const falseAction = actions.nth(1);
+
+  await connectHandles(
+    page,
+    page.locator('[data-id="trigger-new-customer"] .react-flow__handle-right'),
+    page.locator(".react-flow__node-condition .react-flow__handle.target"),
+  );
+  await connectHandles(
+    page,
+    page.locator('.react-flow__node-condition [data-handleid="true"]'),
+    trueAction.locator(".react-flow__handle.target"),
+  );
+  await connectHandles(
+    page,
+    page.locator('.react-flow__node-condition [data-handleid="false"]'),
+    falseAction.locator(".react-flow__handle.target"),
+  );
+  await expect(page.locator(".react-flow__edge")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "Run workflow" }).click();
+
+  await expect(
+    trueAction.locator('[role="status"][aria-label^="Succeeded"]'),
+  ).toBeVisible();
+  await expect(
+    falseAction.locator('[role="status"][aria-label^="Skipped"]'),
+  ).toBeVisible();
+});

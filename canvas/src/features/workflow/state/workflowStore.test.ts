@@ -893,6 +893,107 @@ describe("renameWorkflow", () => {
   });
 });
 
+describe("runWorkflow", () => {
+  beforeEach(() => {
+    useWorkflowStore.setState({
+      workflow: {
+        id: "test-workflow",
+        name: "Test Workflow",
+        nodes: [
+          {
+            id: "A",
+            type: "trigger",
+            position: { x: 0, y: 0 },
+            data: {
+              label: "A",
+              config: {
+                kind: "event",
+                event: "test",
+                samplePayload: JSON.stringify({ plan: "pro" }),
+              },
+            },
+          },
+          {
+            id: "C",
+            type: "condition",
+            position: { x: 100, y: 0 },
+            data: {
+              label: "C",
+              config: { field: "plan", operator: "equals", value: "pro" },
+            },
+          },
+          {
+            id: "True1",
+            type: "action",
+            position: { x: 200, y: -50 },
+            data: { label: "True1", config: { kind: "send_email" } },
+          },
+          {
+            id: "False1",
+            type: "action",
+            position: { x: 200, y: 50 },
+            data: { label: "False1", config: { kind: "send_email" } },
+          },
+        ],
+        edges: [
+          { id: "A->C", source: "A", target: "C" },
+          { id: "C->True1", source: "C", target: "True1", sourceHandle: "true" },
+          { id: "C->False1", source: "C", target: "False1", sourceHandle: "false" },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      selectedNodeId: null,
+      lastRun: null,
+    });
+  });
+
+  it("is null before any run", () => {
+    expect(useWorkflowStore.getState().lastRun).toBeNull();
+  });
+
+  it("records a step per reached node, taking the branch the trigger's sample payload satisfies", () => {
+    useWorkflowStore.getState().runWorkflow();
+
+    const steps = useWorkflowStore.getState().lastRun?.steps ?? [];
+    const byId = new Map(steps.map((step) => [step.nodeId, step]));
+
+    expect(byId.get("True1")?.status).toBe("success");
+    expect(byId.get("False1")?.status).toBe("skipped");
+  });
+
+  it("evaluates against the trigger's current sample payload, not a stale one", () => {
+    useWorkflowStore.getState().runWorkflow();
+    const firstRun = useWorkflowStore.getState().lastRun;
+
+    useWorkflowStore.getState().updateNodeConfig("A", {
+      kind: "event",
+      event: "test",
+      samplePayload: JSON.stringify({ plan: "free" }),
+    });
+    useWorkflowStore.getState().runWorkflow();
+    const secondRun = useWorkflowStore.getState().lastRun;
+
+    const takenBranch = (run: typeof firstRun) =>
+      run?.steps.find((step) => step.nodeId === "True1")?.status;
+
+    expect(takenBranch(firstRun)).toBe("success");
+    expect(takenBranch(secondRun)).toBe("skipped");
+  });
+
+  it("gives each run a unique id and replaces the previous run", () => {
+    useWorkflowStore.getState().runWorkflow();
+    const firstId = useWorkflowStore.getState().lastRun?.id;
+
+    useWorkflowStore.getState().runWorkflow();
+    const secondId = useWorkflowStore.getState().lastRun?.id;
+
+    expect(firstId).toBeDefined();
+    expect(secondId).toBeDefined();
+    expect(secondId).not.toBe(firstId);
+  });
+});
+
 describe("persistence", () => {
   beforeEach(() => {
     useWorkflowStore.setState({
@@ -908,7 +1009,10 @@ describe("persistence", () => {
     });
   });
 
-  function readPersistedValue(): { state: { workflow: Workflow; selectedNodeId?: unknown }; version: number } {
+  function readPersistedValue(): {
+    state: { workflow: Workflow; selectedNodeId?: unknown; lastRun?: unknown };
+    version: number;
+  } {
     const raw = localStorage.getItem(PERSISTENCE_KEY);
     if (raw === null) {
       throw new Error(`Nothing persisted under "${PERSISTENCE_KEY}"`);
@@ -930,6 +1034,14 @@ describe("persistence", () => {
     const persisted = readPersistedValue();
     expect(persisted.state.selectedNodeId).toBeUndefined();
     expect(useWorkflowStore.getState().selectedNodeId).toBe("some-node");
+  });
+
+  it("does not persist lastRun -- a stale run would misrepresent the current workflow", () => {
+    useWorkflowStore.getState().runWorkflow();
+
+    const persisted = readPersistedValue();
+    expect(persisted.state.lastRun).toBeUndefined();
+    expect(useWorkflowStore.getState().lastRun).not.toBeNull();
   });
 
   it("rehydrates the store from a previously persisted workflow", async () => {

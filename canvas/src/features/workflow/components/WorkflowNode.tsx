@@ -1,9 +1,10 @@
 import { Handle, Position } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
-import { Cog, GitBranch, Zap } from 'lucide-react';
+import { Check, Cog, GitBranch, Minus, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useWorkflowStore } from '../state/workflowStore';
 import { CONDITION_BRANCHES } from '../types';
-import type { NodeType } from '../types';
+import type { NodeRunStatus, NodeType } from '../types';
 
 /**
  * The slice of {@link NodeData} the renderer needs.
@@ -38,25 +39,75 @@ const NODE_PRESENTATION: Record<NodeType, NodePresentation> = {
   condition: { kicker: 'Condition', icon: GitBranch, tone: 'text-condition' },
 };
 
+interface RunStatusPresentation {
+  icon: LucideIcon;
+  /** Background + icon colour for the badge itself. */
+  badgeClassName: string;
+  /** Prefixes the step's own detail text as the badge's accessible name. */
+  label: string;
+}
+
+/**
+ * Exhaustive over {@link NodeRunStatus}, same reasoning as
+ * {@link NODE_PRESENTATION}: a new status fails to compile here until it's
+ * given an appearance, rather than silently rendering no badge at all.
+ *
+ * Reuses the `trigger` token's green for "success" -- this codebase
+ * already treats that colour as a generic affirmative signal (see the
+ * "Saved" checkmarks in WorkflowHeader/WorkflowStatusBar), not something
+ * scoped to trigger nodes specifically.
+ */
+const RUN_STATUS_PRESENTATION: Record<NodeRunStatus, RunStatusPresentation> = {
+  success: { icon: Check, badgeClassName: 'bg-trigger text-base', label: 'Succeeded' },
+  failure: { icon: X, badgeClassName: 'bg-danger text-base', label: 'Failed' },
+  skipped: {
+    icon: Minus,
+    badgeClassName: 'bg-elevated text-ink-faint ring-1 ring-line',
+    label: 'Skipped',
+  },
+};
+
 /**
  * Custom renderer for every workflow node. React Flow supplies the drag,
  * selection and focus behaviour; this component owns only the appearance.
  */
 export function WorkflowNode({
+  id,
   type,
   data,
   selected,
 }: NodeProps<WorkflowFlowNode>) {
   const { kicker, icon: Icon, tone } = NODE_PRESENTATION[type];
 
+  // The *same* NodeRunResult object reference survives re-renders unless
+  // runWorkflow() has produced a new lastRun -- so this node doesn't
+  // re-render just because some other node's step changed.
+  const runResult = useWorkflowStore((state) =>
+    state.lastRun?.steps.find((step) => step.nodeId === id),
+  );
+  const runStatus = runResult
+    ? RUN_STATUS_PRESENTATION[runResult.status]
+    : undefined;
+
   return (
     <div
-      className={`w-48 rounded-lg border bg-surface transition-colors ${
+      className={`relative w-48 rounded-lg border bg-surface transition-colors ${
         selected
           ? 'border-accent ring-1 ring-accent/40'
           : 'border-line hover:border-line-strong'
       }`}
     >
+      {runStatus && runResult && (
+        <span
+          role="status"
+          aria-label={`${runStatus.label}: ${runResult.detail}`}
+          title={runResult.detail}
+          className={`absolute -right-2 -top-2 grid size-5 place-items-center rounded-full ring-2 ring-base ${runStatus.badgeClassName}`}
+        >
+          <runStatus.icon className="size-3" aria-hidden="true" />
+        </span>
+      )}
+
       {/* A trigger starts a workflow, so nothing may connect into it. */}
       {type !== 'trigger' ? (
         <Handle type="target" position={Position.Left} />

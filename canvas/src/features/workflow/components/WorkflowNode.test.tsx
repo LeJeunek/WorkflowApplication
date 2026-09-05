@@ -1,12 +1,20 @@
 /** @vitest-environment jsdom */
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 
+import { useWorkflowStore } from "../state/workflowStore";
 import { WorkflowNode } from "./WorkflowNode";
 import type { WorkflowFlowNode, WorkflowNodeViewData } from "./WorkflowNode";
+
+beforeEach(() => {
+  // WorkflowNode reads lastRun directly from the store (see the badge
+  // tests below); resetting it here keeps every other test in this file
+  // -- which never touch the store at all -- from seeing a leftover run.
+  useWorkflowStore.setState({ lastRun: null });
+});
 
 afterEach(cleanup);
 
@@ -129,5 +137,82 @@ describe("WorkflowNode", () => {
 
     expect(unselected.firstElementChild?.className).not.toContain("border-accent");
     expect(selected.firstElementChild?.className).toContain("border-accent");
+  });
+
+  describe("run status badge", () => {
+    function setLastRunStep(
+      status: "success" | "failure" | "skipped",
+      detail = "test detail",
+    ) {
+      useWorkflowStore.setState({
+        lastRun: {
+          id: "run-1",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          finishedAt: "2026-01-01T00:00:00.000Z",
+          steps: [{ nodeId: "node-1", status, detail }],
+        },
+      });
+    }
+
+    it("shows no badge when the workflow has never been run", () => {
+      const { container } = renderNode(
+        <WorkflowNode {...buildProps({ data: { label: "New Customer" } })} />,
+      );
+
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    });
+
+    it("shows no badge for a node absent from the last run's steps", () => {
+      setLastRunStep("success");
+
+      const { container } = renderNode(
+        <WorkflowNode
+          {...buildProps({
+            id: "some-other-node",
+            data: { label: "New Customer" },
+          })}
+        />,
+      );
+
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    });
+
+    it("shows a success badge with the step's detail as its accessible name", () => {
+      setLastRunStep("success", "Ran action \"Send welcome email\".");
+
+      const { container } = renderNode(
+        <WorkflowNode {...buildProps({ data: { label: "New Customer" } })} />,
+      );
+
+      const badge = container.querySelector('[role="status"]');
+      expect(badge).not.toBeNull();
+      expect(badge?.getAttribute("aria-label")).toContain(
+        "Ran action \"Send welcome email\".",
+      );
+    });
+
+    it("shows a distinct badge for a skipped step", () => {
+      setLastRunStep("skipped", "Not reached: the branch leading here was not taken.");
+
+      const { container } = renderNode(
+        <WorkflowNode {...buildProps({ data: { label: "New Customer" } })} />,
+      );
+
+      expect(
+        container.querySelector('[role="status"]')?.getAttribute("aria-label"),
+      ).toContain("Skipped");
+    });
+
+    it("shows a distinct badge for a failure step", () => {
+      setLastRunStep("failure", "Something went wrong.");
+
+      const { container } = renderNode(
+        <WorkflowNode {...buildProps({ data: { label: "New Customer" } })} />,
+      );
+
+      expect(
+        container.querySelector('[role="status"]')?.getAttribute("aria-label"),
+      ).toContain("Failed");
+    });
   });
 });

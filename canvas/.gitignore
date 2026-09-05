@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Environment variables -- real credentials (e.g. a Neon DATABASE_URL) live
+# here. .env.example is intentionally NOT ignored: it's the checked-in
+# template with no real values.
+.env
+.env.*
+!.env.example
+
 # Playwright
 /test-results/
 /playwright-report/
