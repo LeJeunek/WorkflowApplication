@@ -379,3 +379,114 @@ test("Run evaluates the seed trigger's sample payload and badges the right branc
     falseAction.locator('[role="status"][aria-label^="Skipped"]'),
   ).toBeVisible();
 });
+
+test("a full example: branching into a Slack message and an Add tag action, with kind-aware run details", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(4);
+  await page.waitForTimeout(500);
+
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+
+  await page.locator(".react-flow__node-condition").click();
+  await inspector.getByLabel("Field").fill("customer.plan");
+  await inspector.getByLabel("Value").fill("pro");
+
+  const actions = page.locator(".react-flow__node-action");
+  const trueAction = actions.nth(0);
+  const falseAction = actions.nth(1);
+
+  await trueAction.click();
+  await inspector.getByLabel("Kind").selectOption("slack_message");
+  await inspector.getByLabel("Channel").fill("#signups");
+  await inspector.getByLabel("Message").fill("A new pro customer signed up!");
+
+  await falseAction.click();
+  await inspector.getByLabel("Kind").selectOption("add_tag");
+  await inspector.getByLabel("Tag").fill("needs-follow-up");
+
+  await connectHandles(
+    page,
+    page.locator('[data-id="trigger-new-customer"] .react-flow__handle-right'),
+    page.locator(".react-flow__node-condition .react-flow__handle.target"),
+  );
+  await connectHandles(
+    page,
+    page.locator('.react-flow__node-condition [data-handleid="true"]'),
+    trueAction.locator(".react-flow__handle.target"),
+  );
+  await connectHandles(
+    page,
+    page.locator('.react-flow__node-condition [data-handleid="false"]'),
+    falseAction.locator(".react-flow__handle.target"),
+  );
+
+  // Built entirely through the UI, so it's structurally valid throughout --
+  // every rule validateWorkflow checks is already enforced incrementally
+  // by connectNodes/deleteNode as the graph is built.
+  await expect(page.getByText("Valid")).toBeVisible();
+
+  await page.getByRole("button", { name: "Run workflow" }).click();
+
+  const successBadge = trueAction.locator('[role="status"]');
+  await expect(successBadge).toHaveAttribute("aria-label", /^Succeeded/);
+  await expect(successBadge).toHaveAttribute(
+    "aria-label",
+    /Sent a Slack message to "#signups"/,
+  );
+
+  const skippedBadge = falseAction.locator('[role="status"]');
+  await expect(skippedBadge).toHaveAttribute("aria-label", /^Skipped/);
+});
+
+test("a corrupted saved workflow is flagged as invalid and Run is disabled", async ({
+  page,
+}) => {
+  // This shape can never arise through the app's own UI -- connectNodes
+  // rejects a connection to a nonexistent node before it's ever created.
+  // It simulates the one real way an invalid Workflow reaches this app:
+  // hand-edited localStorage, or a document saved by an older schema.
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "canvas:workflow",
+      JSON.stringify({
+        state: {
+          workflow: {
+            id: "corrupted",
+            name: "Corrupted Workflow",
+            nodes: [
+              {
+                id: "trigger-1",
+                type: "trigger",
+                position: { x: 0, y: 0 },
+                data: {
+                  label: "A",
+                  config: { kind: "event", event: "test" },
+                },
+              },
+            ],
+            edges: [
+              { id: "edge-1", source: "trigger-1", target: "does-not-exist" },
+            ],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+        version: 1,
+      }),
+    );
+  });
+  await page.reload();
+
+  await expect(page.getByText(/^\d+ issues?$/)).toBeVisible();
+
+  const runButton = page.getByRole("button", { name: "Run workflow" });
+  await expect(runButton).toBeDisabled();
+  await expect(runButton).toHaveAttribute(
+    "title",
+    /references a node that no longer exists/,
+  );
+});

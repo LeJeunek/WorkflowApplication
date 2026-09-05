@@ -87,4 +87,33 @@ describe("WorkflowHeader", () => {
 
     expect(useWorkflowStore.getState().lastRun).not.toBeNull();
   });
+
+  it("disables Run for a structurally invalid workflow even with a trigger present", () => {
+    // This shape can't arise through the app's own actions -- it's the
+    // guard against a Workflow that didn't come from them (hand-edited
+    // storage, an older schema).
+    useWorkflowStore.setState({
+      workflow: {
+        ...WORKFLOW_WITH_TRIGGER,
+        edges: [
+          { id: "edge-1", source: "trigger-1", target: "does-not-exist" },
+        ],
+      },
+    });
+    render(<WorkflowHeader />);
+
+    const button = screen.getByRole("button", { name: "Run workflow" });
+    expect(button).toHaveProperty("disabled", true);
+    expect(button.getAttribute("title")).toContain(
+      "references a node that no longer exists",
+    );
+  });
+
+  it("explains via title why Run is disabled when there's no trigger", () => {
+    render(<WorkflowHeader />);
+
+    expect(
+      screen.getByRole("button", { name: "Run workflow" }).getAttribute("title"),
+    ).toBe("Add a trigger node to run this workflow.");
+  });
 });

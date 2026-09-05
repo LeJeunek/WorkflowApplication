@@ -38,6 +38,14 @@ function getByPath(payload: Record<string, unknown>, path: string): unknown {
  *   (`actual` is `undefined`) becomes `""` via `?? ""`, so "does the
  *   missing field contain X" is reliably `false` instead of throwing on
  *   `String(undefined)` producing the literal text `"undefined"`.
+ *
+ * `contains` is case-insensitive (both sides are lowercased before the
+ * substring check); `equals`/`not_equals` are exact. This deliberately
+ * doesn't match by matching -- a "contains" check reads to a person as
+ * "roughly this text is in there," and matching that expectation matters
+ * more here than mirroring JavaScript's own case-sensitive `.includes()`.
+ * `equals` stays exact because a workflow author who wants exact matching
+ * (an id, a status enum) needs *some* operator that means what it says.
  */
 export function evaluateCondition(
   config: ConditionConfig,
@@ -51,7 +59,9 @@ export function evaluateCondition(
     case "not_equals":
       return actual !== config.value;
     case "contains":
-      return String(actual ?? "").includes(config.value);
+      return String(actual ?? "")
+        .toLowerCase()
+        .includes(config.value.toLowerCase());
     case "greater_than":
       return Number(actual) > Number(config.value);
     case "less_than":

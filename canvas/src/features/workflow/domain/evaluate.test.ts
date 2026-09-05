@@ -34,6 +34,15 @@ describe("evaluateCondition", () => {
       expect(evaluateCondition(condition("plan", "equals", "pro"), payload)).toBe(true);
       expect(evaluateCondition(condition("plan", "not_equals", "pro"), payload)).toBe(false);
     });
+
+    it("is case-sensitive, unlike contains", () => {
+      // Deliberate asymmetry: equals is for exact matches (an id, a status
+      // enum) where a workflow author who chose it wants it to mean what
+      // it says, unlike contains's more forgiving "roughly this text".
+      expect(
+        evaluateCondition(condition("plan", "equals", "Pro"), { plan: "pro" }),
+      ).toBe(false);
+    });
   });
 
   describe("contains", () => {
@@ -57,6 +66,23 @@ describe("evaluateCondition", () => {
       expect(
         evaluateCondition(condition("missing", "contains", "x"), {}),
       ).toBe(false);
+    });
+
+    it("is case-insensitive", () => {
+      // The exact scenario that motivated this: a payload with a lowercase
+      // "pro" plan and a condition value typed as "Pro" should still match
+      // -- a person reading "contains" expects roughly-this-text-is-in-there,
+      // not JavaScript's own case-sensitive String.includes().
+      expect(
+        evaluateCondition(condition("customer.plan", "contains", "Pro"), {
+          customer: { plan: "pro" },
+        }),
+      ).toBe(true);
+      expect(
+        evaluateCondition(condition("plan", "contains", "PRO"), {
+          plan: "approved",
+        }),
+      ).toBe(true);
     });
   });
 

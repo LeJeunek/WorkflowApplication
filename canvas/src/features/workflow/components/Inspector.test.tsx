@@ -152,6 +152,49 @@ describe("Inspector", () => {
     });
   });
 
+  it("switching the trigger's Kind does not clobber an existing Sample payload", () => {
+    // samplePayload isn't tied to any one kind -- the same field, same
+    // meaning, on event/schedule/form_submission alike -- so switching
+    // Kind has no reason to lose it, unlike event/cron/formName which
+    // genuinely don't carry over.
+    useWorkflowStore.setState({
+      workflow: {
+        ...BASE_WORKFLOW,
+        nodes: BASE_WORKFLOW.nodes.map((node) =>
+          node.id === "trigger-1" && node.type === "trigger"
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  config: {
+                    kind: "event" as const,
+                    event: "customer.created",
+                    samplePayload: '{"plan": "pro"}',
+                  },
+                },
+              }
+            : node,
+        ),
+      },
+      selectedNodeId: "trigger-1",
+    });
+    render(<Inspector />);
+
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "schedule" },
+    });
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "trigger-1")?.data.config,
+    ).toEqual({
+      kind: "schedule",
+      cron: "",
+      samplePayload: '{"plan": "pro"}',
+    });
+  });
+
   it("shows an inline error for invalid JSON in Sample payload, and clears it once fixed", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);

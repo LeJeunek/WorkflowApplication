@@ -57,14 +57,23 @@ const ACTION_CONFIG_KIND_LABELS: Record<ActionConfigKind, string> = {
  * added (as just happened going from 2 to 3/4 kinds), where `TriggerConfig`
  * already grows on its own.
  */
-function defaultTriggerConfig(kind: TriggerConfigKind): TriggerConfig {
+/**
+ * `samplePayload` is threaded through explicitly, not discarded like the
+ * kind-specific fields (`event`/`cron`/`formName`) are: unlike those, it
+ * isn't tied to any one kind -- it's the same field, same meaning, on
+ * every variant -- so switching Kind has no reason to lose it.
+ */
+function defaultTriggerConfig(
+  kind: TriggerConfigKind,
+  samplePayload: string | undefined,
+): TriggerConfig {
   switch (kind) {
     case "event":
-      return { kind: "event", event: "" };
+      return { kind: "event", event: "", samplePayload };
     case "schedule":
-      return { kind: "schedule", cron: "" };
+      return { kind: "schedule", cron: "", samplePayload };
     case "form_submission":
-      return { kind: "form_submission", formName: "" };
+      return { kind: "form_submission", formName: "", samplePayload };
   }
 }
 
@@ -381,6 +390,7 @@ export function Inspector() {
                           selectedNode.id,
                           defaultTriggerConfig(
                             event.target.value as TriggerConfigKind,
+                            selectedNode.data.config.samplePayload,
                           ),
                         )
                       }
