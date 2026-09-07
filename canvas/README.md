@@ -129,6 +129,10 @@ Three layers, each testing what the layer below it can't:
 
 Vite · React 19 · TypeScript (strict) · [@xyflow/react](https://reactflow.dev/) · Zustand · Tailwind CSS v4 · Lucide React · Vitest · React Testing Library · Playwright.
 
+## Undo / redo
+
+Every store mutation (add/move/connect/delete a node or edge, edit a field, rename the workflow) is undoable via the header's Undo/Redo buttons or **Ctrl+Z** / **Ctrl+Y** (suppressed while a text field has focus, so it doesn't hijack the field's own native undo). History is kept as full `Workflow` snapshots rather than per-action inverses — the document is small enough that this is far simpler than a command pattern, and rapid edits to the same field (typing in an Inspector input) coalesce into a single undo step instead of one per keystroke. History is session-only, not persisted.
+
 ## Not built (yet)
 
-Undo/redo, multi-select, `duplicateNode`, and the Postgres backend sketched above but not wired up.
+Multi-select, `duplicateNode`, and the Postgres backend sketched above but not wired up.

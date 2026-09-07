@@ -125,6 +125,29 @@ export interface WorkflowStore {
    * (see domain/execution.ts).
    */
   runWorkflow: () => void;
+
+  /**
+   * Undo/redo history, as full document snapshots rather than an inverse
+   * per action -- a workflow is small enough that this is dramatically
+   * simpler than a command pattern's inverses, and cheap enough that the
+   * simplicity is free. Neither is persisted (same reasoning as `lastRun`):
+   * ephemeral session state, not part of the saved document. The most
+   * recent entry is always at the end of the array in both.
+   */
+  past: Workflow[];
+  future: Workflow[];
+
+  /**
+   * Bookkeeping for `commitWorkflow`'s coalescing (see there) -- which edit
+   * was last committed, and when, so the next same-field keystroke can
+   * decide whether to merge into it or start a fresh undo step. Not
+   * meaningful to read outside the store itself; exists as real state
+   * (rather than a module-level variable) purely so tests can reset it.
+   */
+  lastCommit: { key: string; at: number } | null;
+
+  undo: () => void;
+  redo: () => void;
 }
 
 export const COLUMN_SPACING = 240;
@@ -190,6 +213,66 @@ function now(): IsoDateString {
   return new Date().toISOString();
 }
 
+interface CoalesceOptions {
+  /** Edits sharing a key merge into one undo step if they land within `windowMs` of each other. */
+  key: string;
+  windowMs: number;
+}
+
+/**
+ * Every mutating action's single path to actually changing `workflow`. Two
+ * responsibilities live here rather than in each action, because both are
+ * easy to get subtly wrong if repeated by hand:
+ *
+ * - Only pushes an undo step when `computeNext` returns a genuinely
+ *   *different* `Workflow` object. An action that turns out to be a no-op
+ *   (an unknown id, a rejected connection) must return the same reference
+ *   it was given for this to work -- which is also what finally fixes the
+ *   older "updatedAt bumps even on a no-op delete" issue, for the same
+ *   reason.
+ * - Coalesces rapid edits sharing a `coalesce.key` (every keystroke in the
+ *   Inspector calls updateNode/updateNodeConfig) into a single undo step,
+ *   rather than one step per character typed. Discrete actions
+ *   (add/delete/connect/move) pass no `coalesce` and always get their own
+ *   step.
+ *
+ * The coalescing bookkeeping (`state.lastCommit`) lives in the store's own
+ * state, not a module-level variable: a bare closure variable can't be
+ * reset by `setState`, which would let a test's leftover coalescing key
+ * silently bleed into a later, unrelated test that happens to touch the
+ * same node id within the same window.
+ */
+function commitWorkflow(
+  state: WorkflowStore,
+  computeNext: (workflow: Workflow) => Workflow,
+  coalesce?: CoalesceOptions,
+): Pick<WorkflowStore, "workflow" | "past" | "future" | "lastCommit"> {
+  const nextWorkflow = computeNext(state.workflow);
+
+  if (nextWorkflow === state.workflow) {
+    return {
+      workflow: state.workflow,
+      past: state.past,
+      future: state.future,
+      lastCommit: state.lastCommit,
+    };
+  }
+
+  const at = Date.now();
+  const shouldCoalesce =
+    coalesce !== undefined &&
+    state.lastCommit !== null &&
+    state.lastCommit.key === coalesce.key &&
+    at - state.lastCommit.at < coalesce.windowMs;
+
+  return {
+    workflow: nextWorkflow,
+    past: shouldCoalesce ? state.past : [...state.past, state.workflow],
+    future: [],
+    lastCommit: coalesce ? { key: coalesce.key, at } : null,
+  };
+}
+
 /** Fixed so the seed workflow is identical on every load. */
 const SEED_TIMESTAMP: IsoDateString = "2026-01-01T00:00:00.000Z";
 
@@ -251,238 +334,310 @@ export const useWorkflowStore = create<WorkflowStore>()(
           },
         })),
 
-      addNode: (input) =>
+      past: [],
+      future: [],
+      lastCommit: null,
+
+      undo: () =>
         set((state) => {
-          const position =
-            input.position ??
-            nextPosition(
-              state.workflow.nodes,
-              snapToGrid(input.origin ?? FLOW_ORIGIN),
-            );
-
-          const id = crypto.randomUUID();
-
-          const node: WorkflowNode =
-            input.type === "trigger"
-              ? {
-                  id,
-                  type: "trigger",
-                  position,
-                  data: {
-                    label: input.label,
-                    config: input.config,
-                  },
-                }
-              : input.type === "action"
-                ? {
-                    id,
-                    type: "action",
-                    position,
-                    data: {
-                      label: input.label,
-                      config: input.config,
-                    },
-                  }
-                : {
-                    id,
-                    type: "condition",
-                    position,
-                    data: {
-                      label: input.label,
-                      config: input.config,
-                    },
-                  };
-
-          return {
-            workflow: {
-              ...state.workflow,
-              nodes: [...state.workflow.nodes, node],
-              updatedAt: now(),
-            },
-          };
-        }),
-
-      moveNode: (id, position) =>
-        set((state) => ({
-          workflow: {
-            ...state.workflow,
-
-            nodes: state.workflow.nodes.map((node) =>
-              node.id === id
-                ? {
-                    ...node,
-                    position,
-                  }
-                : node,
-            ),
-
-            updatedAt: now(),
-          },
-        })),
-
-      connectNodes: (source, target, sourceHandle) =>
-        set((state) => {
-          if (
-            !canConnect(
-              state.workflow.nodes,
-              state.workflow.edges,
-              source,
-              target,
-              sourceHandle,
-            )
-          ) {
+          if (state.past.length === 0) {
             return state;
           }
 
-          const edge: WorkflowEdge = {
-            id: crypto.randomUUID(),
-            source,
-            target,
-            // Spread conditionally so unbranched edges have no `sourceHandle`
-            // key at all, rather than an explicit `undefined`.
-            ...(sourceHandle ? { sourceHandle } : {}),
-          };
-
+          const previous = state.past[state.past.length - 1];
           return {
-            workflow: {
-              ...state.workflow,
-              edges: [...state.workflow.edges, edge],
-              updatedAt: now(),
-            },
+            workflow: previous,
+            past: state.past.slice(0, -1),
+            future: [...state.future, state.workflow],
+            lastCommit: null,
+            selectedNodeId: previous.nodes.some(
+              (node) => node.id === state.selectedNodeId,
+            )
+              ? state.selectedNodeId
+              : null,
           };
         }),
 
+      redo: () =>
+        set((state) => {
+          if (state.future.length === 0) {
+            return state;
+          }
+
+          const next = state.future[state.future.length - 1];
+          return {
+            workflow: next,
+            past: [...state.past, state.workflow],
+            future: state.future.slice(0, -1),
+            lastCommit: null,
+            selectedNodeId: next.nodes.some(
+              (node) => node.id === state.selectedNodeId,
+            )
+              ? state.selectedNodeId
+              : null,
+          };
+        }),
+
+      addNode: (input) =>
+        set((state) =>
+          commitWorkflow(state, (workflow) => {
+            const position =
+              input.position ??
+              nextPosition(
+                workflow.nodes,
+                snapToGrid(input.origin ?? FLOW_ORIGIN),
+              );
+
+            const id = crypto.randomUUID();
+
+            const node: WorkflowNode =
+              input.type === "trigger"
+                ? {
+                    id,
+                    type: "trigger",
+                    position,
+                    data: {
+                      label: input.label,
+                      config: input.config,
+                    },
+                  }
+                : input.type === "action"
+                  ? {
+                      id,
+                      type: "action",
+                      position,
+                      data: {
+                        label: input.label,
+                        config: input.config,
+                      },
+                    }
+                  : {
+                      id,
+                      type: "condition",
+                      position,
+                      data: {
+                        label: input.label,
+                        config: input.config,
+                      },
+                    };
+
+            return {
+              ...workflow,
+              nodes: [...workflow.nodes, node],
+              updatedAt: now(),
+            };
+          }),
+        ),
+
+      moveNode: (id, position) =>
+        set((state) =>
+          commitWorkflow(state, (workflow) =>
+            workflow.nodes.some((node) => node.id === id)
+              ? {
+                  ...workflow,
+                  nodes: workflow.nodes.map((node) =>
+                    node.id === id ? { ...node, position } : node,
+                  ),
+                  updatedAt: now(),
+                }
+              : workflow,
+          ),
+        ),
+
+      connectNodes: (source, target, sourceHandle) =>
+        set((state) =>
+          commitWorkflow(state, (workflow) => {
+            if (
+              !canConnect(workflow.nodes, workflow.edges, source, target, sourceHandle)
+            ) {
+              return workflow;
+            }
+
+            const edge: WorkflowEdge = {
+              id: crypto.randomUUID(),
+              source,
+              target,
+              // Spread conditionally so unbranched edges have no
+              // `sourceHandle` key at all, rather than an explicit `undefined`.
+              ...(sourceHandle ? { sourceHandle } : {}),
+            };
+
+            return {
+              ...workflow,
+              edges: [...workflow.edges, edge],
+              updatedAt: now(),
+            };
+          }),
+        ),
+
       updateNode: (id, input) =>
-        set((state) => ({
-          workflow: {
-            ...state.workflow,
-
-            nodes: state.workflow.nodes.map((node) => {
-              if (node.id !== id) {
-                return node;
+        set((state) =>
+          commitWorkflow(
+            state,
+            (workflow) => {
+              if (!workflow.nodes.some((node) => node.id === id)) {
+                return workflow;
               }
 
-              switch (node.type) {
-                case "trigger":
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      ...(input.label !== undefined
-                        ? { label: input.label }
-                        : {}),
-                      ...(input.description !== undefined
-                        ? { description: input.description }
-                        : {}),
-                    },
-                  };
+              return {
+                ...workflow,
+                nodes: workflow.nodes.map((node) => {
+                  if (node.id !== id) {
+                    return node;
+                  }
 
-                case "action":
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      ...(input.label !== undefined
-                        ? { label: input.label }
-                        : {}),
-                      ...(input.description !== undefined
-                        ? { description: input.description }
-                        : {}),
-                    },
-                  };
+                  // A per-type switch, not one generic branch: spreading
+                  // ...node.data (a union of three shapes) and returning it
+                  // as WorkflowNode only type-checks when each branch stays
+                  // inside the one node type it started as.
+                  switch (node.type) {
+                    case "trigger":
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          ...(input.label !== undefined
+                            ? { label: input.label }
+                            : {}),
+                          ...(input.description !== undefined
+                            ? { description: input.description }
+                            : {}),
+                        },
+                      };
 
-                case "condition":
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      ...(input.label !== undefined
-                        ? { label: input.label }
-                        : {}),
-                      ...(input.description !== undefined
-                        ? { description: input.description }
-                        : {}),
-                    },
-                  };
-              }
-            }),
+                    case "action":
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          ...(input.label !== undefined
+                            ? { label: input.label }
+                            : {}),
+                          ...(input.description !== undefined
+                            ? { description: input.description }
+                            : {}),
+                        },
+                      };
 
-            updatedAt: now(),
-          },
-        })),
+                    case "condition":
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          ...(input.label !== undefined
+                            ? { label: input.label }
+                            : {}),
+                          ...(input.description !== undefined
+                            ? { description: input.description }
+                            : {}),
+                        },
+                      };
+                  }
+                }),
+                updatedAt: now(),
+              };
+            },
+            { key: `updateNode:${id}`, windowMs: 800 },
+          ),
+        ),
 
       updateNodeConfig: (id, config) =>
-        set((state) => ({
-          workflow: {
-            ...state.workflow,
-
-            nodes: state.workflow.nodes.map((node) => {
-              if (node.id !== id) {
-                return node;
+        set((state) =>
+          commitWorkflow(
+            state,
+            (workflow) => {
+              if (!workflow.nodes.some((node) => node.id === id)) {
+                return workflow;
               }
 
-              switch (node.type) {
-                case "trigger":
-                  return isTriggerConfig(config)
-                    ? { ...node, data: { ...node.data, config } }
-                    : node;
+              const nodes = workflow.nodes.map((node) => {
+                if (node.id !== id) {
+                  return node;
+                }
 
-                case "action":
-                  return isActionConfig(config)
-                    ? { ...node, data: { ...node.data, config } }
-                    : node;
+                // The type-predicate check happens inside each branch, not
+                // hoisted above the map: that's what lets it narrow `config`
+                // to the exact shape each branch returns.
+                switch (node.type) {
+                  case "trigger":
+                    return isTriggerConfig(config)
+                      ? { ...node, data: { ...node.data, config } }
+                      : node;
 
-                case "condition":
-                  return isConditionConfig(config)
-                    ? { ...node, data: { ...node.data, config } }
-                    : node;
+                  case "action":
+                    return isActionConfig(config)
+                      ? { ...node, data: { ...node.data, config } }
+                      : node;
+
+                  case "condition":
+                    return isConditionConfig(config)
+                      ? { ...node, data: { ...node.data, config } }
+                      : node;
+                }
+              });
+
+              // Every node is unchanged (the shape didn't match) --
+              // genuinely a no-op, so don't record an undo step or bump
+              // updatedAt for a change that didn't happen.
+              if (nodes.every((node, index) => node === workflow.nodes[index])) {
+                return workflow;
               }
-            }),
 
-            updatedAt: now(),
-          },
-        })),
+              return { ...workflow, nodes, updatedAt: now() };
+            },
+            { key: `updateNodeConfig:${id}`, windowMs: 800 },
+          ),
+        ),
+
       deleteNode: (id) =>
         set((state) => ({
-          workflow: {
-            ...state.workflow,
-
-            nodes: state.workflow.nodes.filter((node) => node.id !== id),
-
-            edges: state.workflow.edges.filter(
-              (edge) => edge.source !== id && edge.target !== id,
-            ),
-
-            updatedAt: now(),
-          },
-
+          ...commitWorkflow(state, (workflow) =>
+            workflow.nodes.some((node) => node.id === id)
+              ? {
+                  ...workflow,
+                  nodes: workflow.nodes.filter((node) => node.id !== id),
+                  edges: workflow.edges.filter(
+                    (edge) => edge.source !== id && edge.target !== id,
+                  ),
+                  updatedAt: now(),
+                }
+              : workflow,
+          ),
           selectedNodeId:
             state.selectedNodeId === id ? null : state.selectedNodeId,
         })),
 
       deleteEdge: (id) =>
-        set((state) => ({
-          workflow: {
-            ...state.workflow,
-            edges: state.workflow.edges.filter((edge) => edge.id !== id),
-            updatedAt: now(),
-          },
-        })),
+        set((state) =>
+          commitWorkflow(state, (workflow) =>
+            workflow.edges.some((edge) => edge.id === id)
+              ? {
+                  ...workflow,
+                  edges: workflow.edges.filter((edge) => edge.id !== id),
+                  updatedAt: now(),
+                }
+              : workflow,
+          ),
+        ),
 
       renameWorkflow: (name) =>
-        set((state) => ({
-          workflow: {
-            ...state.workflow,
-            name,
-            updatedAt: now(),
-          },
-        })),
+        set((state) =>
+          commitWorkflow(
+            state,
+            (workflow) =>
+              workflow.name === name
+                ? workflow
+                : { ...workflow, name, updatedAt: now() },
+            { key: "renameWorkflow", windowMs: 800 },
+          ),
+        ),
     }),
     {
       name: PERSISTENCE_KEY,
       version: PERSISTENCE_VERSION,
       storage: workflowStorage,
-      // selectedNodeId is ephemeral UI state, not part of the saved document.
+      // selectedNodeId/past/future are ephemeral UI/session state, not
+      // part of the saved document.
       partialize: (state) => ({ workflow: state.workflow }),
     },
   ),

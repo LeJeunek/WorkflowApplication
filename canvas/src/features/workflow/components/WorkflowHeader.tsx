@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Check, Play, Workflow } from 'lucide-react';
+import { Check, Play, Redo2, Undo2, Workflow } from 'lucide-react';
 
 import { validateWorkflow } from '../domain/validation';
 import { useWorkflowStore } from '../state/workflowStore';
@@ -31,6 +31,11 @@ export function WorkflowHeader() {
   const validation = useMemo(() => validateWorkflow(workflow), [workflow]);
   const canRun = hasTrigger && validation.valid;
 
+  const undo = useWorkflowStore((state) => state.undo);
+  const redo = useWorkflowStore((state) => state.redo);
+  const canUndo = useWorkflowStore((state) => state.past.length > 0);
+  const canRedo = useWorkflowStore((state) => state.future.length > 0);
+
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
       <div className="flex shrink-0 items-center gap-2.5">
@@ -58,23 +63,48 @@ export function WorkflowHeader() {
         </span>
       </div>
 
-      <button
-        type="button"
-        aria-label="Run workflow"
-        disabled={!canRun}
-        title={
-          !hasTrigger
-            ? "Add a trigger node to run this workflow."
-            : !validation.valid
-              ? validation.errors.map((error) => error.message).join("\n")
-              : undefined
-        }
-        onClick={() => runWorkflow()}
-        className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
-      >
-        <Play className="size-3.5 fill-current" aria-hidden="true" />
-        Run
-      </button>
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          aria-label="Undo"
+          title="Undo (Ctrl+Z)"
+          disabled={!canUndo}
+          onClick={() => undo()}
+          className="rounded-md p-1.5 text-ink-faint transition-colors hover:bg-elevated hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+        >
+          <Undo2 className="size-3.5" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label="Redo"
+          title="Redo (Ctrl+Y)"
+          disabled={!canRedo}
+          onClick={() => redo()}
+          className="rounded-md p-1.5 text-ink-faint transition-colors hover:bg-elevated hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+        >
+          <Redo2 className="size-3.5" aria-hidden="true" />
+        </button>
+
+        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+
+        <button
+          type="button"
+          aria-label="Run workflow"
+          disabled={!canRun}
+          title={
+            !hasTrigger
+              ? "Add a trigger node to run this workflow."
+              : !validation.valid
+                ? validation.errors.map((error) => error.message).join("\n")
+                : undefined
+          }
+          onClick={() => runWorkflow()}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+        >
+          <Play className="size-3.5 fill-current" aria-hidden="true" />
+          Run
+        </button>
+      </div>
     </header>
   );
 }

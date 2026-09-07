@@ -32,6 +32,9 @@ beforeEach(() => {
     workflow: EMPTY_WORKFLOW,
     selectedNodeId: null,
     lastRun: null,
+    past: [],
+    future: [],
+    lastCommit: null,
   });
 });
 
@@ -115,5 +118,45 @@ describe("WorkflowHeader", () => {
     expect(
       screen.getByRole("button", { name: "Run workflow" }).getAttribute("title"),
     ).toBe("Add a trigger node to run this workflow.");
+  });
+
+  it("disables Undo and Redo when there is no history", () => {
+    render(<WorkflowHeader />);
+
+    expect(screen.getByRole("button", { name: "Undo" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Redo" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("enables Undo once there is a past entry, and clicking it calls undo", () => {
+    useWorkflowStore.setState({ past: [EMPTY_WORKFLOW] });
+    render(<WorkflowHeader />);
+
+    const undoButton = screen.getByRole("button", { name: "Undo" });
+    expect(undoButton).toHaveProperty("disabled", false);
+
+    fireEvent.click(undoButton);
+
+    // The store's own undo() pops `past` -- calling through the button
+    // is enough to prove it's wired to the real action, not a stub.
+    expect(useWorkflowStore.getState().past).toEqual([]);
+  });
+
+  it("enables Redo once there is a future entry, and clicking it calls redo", () => {
+    useWorkflowStore.setState({ future: [WORKFLOW_WITH_TRIGGER] });
+    render(<WorkflowHeader />);
+
+    const redoButton = screen.getByRole("button", { name: "Redo" });
+    expect(redoButton).toHaveProperty("disabled", false);
+
+    fireEvent.click(redoButton);
+
+    expect(useWorkflowStore.getState().workflow).toEqual(WORKFLOW_WITH_TRIGGER);
+    expect(useWorkflowStore.getState().future).toEqual([]);
   });
 });

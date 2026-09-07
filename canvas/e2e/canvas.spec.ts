@@ -491,6 +491,60 @@ test("a corrupted saved workflow is flagged as invalid and Run is disabled", asy
   );
 });
 
+test("the Undo and Redo buttons step a rename backward and forward", async ({
+  page,
+}) => {
+  const nameInput = page.getByLabel("Workflow name");
+  const undoButton = page.getByRole("button", { name: "Undo" });
+  const redoButton = page.getByRole("button", { name: "Redo" });
+
+  await expect(undoButton).toBeDisabled();
+
+  await nameInput.fill("Renamed via Test");
+  await expect(nameInput).toHaveValue("Renamed via Test");
+  await expect(undoButton).toBeEnabled();
+
+  await undoButton.click();
+  await expect(nameInput).toHaveValue("Untitled Workflow");
+  await expect(redoButton).toBeEnabled();
+
+  await redoButton.click();
+  await expect(nameInput).toHaveValue("Renamed via Test");
+});
+
+test("Ctrl+Z and Ctrl+Y undo and redo a node addition", async ({ page }) => {
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+
+  // Adding the node via a palette button (not a text field) leaves nothing
+  // focused that should suppress the shortcut.
+  await page.keyboard.press("Control+Z");
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
+
+  await page.keyboard.press("Control+Y");
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+});
+
+test("the undo/redo shortcut is suppressed while a text field has focus", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Add Action node" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+
+  // Focus the name field without editing it, then try the shortcut. If the
+  // node addition got undone here, the shortcut leaked past the text-field
+  // guard -- it must stay reserved for the field's own native undo instead.
+  await page.getByLabel("Workflow name").click();
+  await page.keyboard.press("Control+Z");
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+
+  // Move focus out of the field, and the same shortcut now reaches the
+  // workflow's own undo.
+  await page.locator(".react-flow__pane").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("Control+Z");
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
+});
+
 test("Run shows a dismissible results panel listing every step in plain language", async ({
   page,
 }) => {

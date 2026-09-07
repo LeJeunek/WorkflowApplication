@@ -7,7 +7,7 @@
  * so the persistence tests below exercise the same code path production
  * runs through, rather than a hand-rolled stand-in.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PERSISTENCE_KEY, PERSISTENCE_VERSION } from "./persistence";
 import {
@@ -256,6 +256,9 @@ describe("deleteNode", () => {
     const after = useWorkflowStore.getState().workflow;
     expect(after.nodes).toEqual(before.nodes);
     expect(after.edges).toEqual(before.edges);
+    // The exact same object, not just structurally equal -- a genuine
+    // no-op doesn't bump updatedAt or reallocate arrays.
+    expect(after).toBe(before);
   });
   it("clears selection and removes connected edges together when the selected node is deleted", () => {
     useWorkflowStore.setState((state) => ({
@@ -331,6 +334,7 @@ describe("deleteEdge", () => {
     useWorkflowStore.getState().deleteEdge("does-not-exist");
     const after = useWorkflowStore.getState().workflow;
     expect(after.edges).toEqual(before.edges);
+    expect(after).toBe(before);
   });
   it("leaves nodes and the current selection untouched", () => {
     useWorkflowStore.setState({ selectedNodeId: "A" });
@@ -446,9 +450,11 @@ describe("updateNode", () => {
   });
 
   it("does nothing when updating an unknown node id", () => {
-    const before = useWorkflowStore.getState().workflow.nodes;
+    const before = useWorkflowStore.getState().workflow;
     useWorkflowStore.getState().updateNode("does-not-exist", { label: "X" });
-    expect(useWorkflowStore.getState().workflow.nodes).toEqual(before);
+    const after = useWorkflowStore.getState().workflow;
+    expect(after.nodes).toEqual(before.nodes);
+    expect(after).toBe(before);
   });
 });
 
@@ -576,12 +582,14 @@ describe("updateNodeConfig", () => {
   });
 
   it("does nothing when updating config for an unknown node id", () => {
-    const before = useWorkflowStore.getState().workflow.nodes;
+    const before = useWorkflowStore.getState().workflow;
     useWorkflowStore.getState().updateNodeConfig("does-not-exist", {
       kind: "event",
       event: "x",
     });
-    expect(useWorkflowStore.getState().workflow.nodes).toEqual(before);
+    const after = useWorkflowStore.getState().workflow;
+    expect(after.nodes).toEqual(before.nodes);
+    expect(after).toBe(before);
   });
 });
 
@@ -806,9 +814,11 @@ describe("moveNode", () => {
   });
 
   it("does nothing when moving an unknown node id", () => {
-    const before = useWorkflowStore.getState().workflow.nodes;
+    const before = useWorkflowStore.getState().workflow;
     useWorkflowStore.getState().moveNode("does-not-exist", { x: 1, y: 1 });
-    expect(useWorkflowStore.getState().workflow.nodes).toEqual(before);
+    const after = useWorkflowStore.getState().workflow;
+    expect(after.nodes).toEqual(before.nodes);
+    expect(after).toBe(before);
   });
 });
 
@@ -1064,5 +1074,221 @@ describe("persistence", () => {
     await useWorkflowStore.persist.rehydrate();
 
     expect(useWorkflowStore.getState().workflow).toEqual(persistedWorkflow);
+  });
+});
+
+describe("undo / redo", () => {
+  const FIXTURE_WORKFLOW: Workflow = {
+    id: "test-workflow",
+    name: "Test Workflow",
+    nodes: [
+      {
+        id: "A",
+        type: "trigger",
+        position: { x: 0, y: 0 },
+        data: { label: "A", config: { kind: "event", event: "test" } },
+      },
+      {
+        id: "B",
+        type: "action",
+        position: { x: 100, y: 0 },
+        data: { label: "B", config: { kind: "send_email" } },
+      },
+    ],
+    edges: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  beforeEach(() => {
+    useWorkflowStore.setState({
+      workflow: FIXTURE_WORKFLOW,
+      selectedNodeId: null,
+      past: [],
+      future: [],
+      lastCommit: null,
+    });
+  });
+
+  it("starts with empty history", () => {
+    expect(useWorkflowStore.getState().past).toEqual([]);
+    expect(useWorkflowStore.getState().future).toEqual([]);
+  });
+
+  it("undo reverts the last action", () => {
+    const store = useWorkflowStore.getState();
+    store.renameWorkflow("Renamed");
+    expect(useWorkflowStore.getState().workflow.name).toBe("Renamed");
+
+    useWorkflowStore.getState().undo();
+
+    expect(useWorkflowStore.getState().workflow.name).toBe("Test Workflow");
+  });
+
+  it("redo re-applies an action that was just undone", () => {
+    const store = useWorkflowStore.getState();
+    store.renameWorkflow("Renamed");
+    store.undo();
+    expect(useWorkflowStore.getState().workflow.name).toBe("Test Workflow");
+
+    useWorkflowStore.getState().redo();
+
+    expect(useWorkflowStore.getState().workflow.name).toBe("Renamed");
+  });
+
+  it("undo is a no-op when there is nothing to undo", () => {
+    const before = useWorkflowStore.getState().workflow;
+    useWorkflowStore.getState().undo();
+    expect(useWorkflowStore.getState().workflow).toBe(before);
+  });
+
+  it("redo is a no-op when there is nothing to redo", () => {
+    const before = useWorkflowStore.getState().workflow;
+    useWorkflowStore.getState().redo();
+    expect(useWorkflowStore.getState().workflow).toBe(before);
+  });
+
+  it("a new action after undo discards redo history rather than keeping it around", () => {
+    const store = useWorkflowStore.getState();
+    store.renameWorkflow("First");
+    store.undo();
+    expect(useWorkflowStore.getState().future).toHaveLength(1);
+
+    store.renameWorkflow("Second");
+
+    expect(useWorkflowStore.getState().future).toEqual([]);
+    useWorkflowStore.getState().redo(); // no-op: nothing to redo anymore
+    expect(useWorkflowStore.getState().workflow.name).toBe("Second");
+  });
+
+  it("undoes several independent actions one at a time, in reverse order", () => {
+    // Three genuinely distinct action *types* -- unlike two renameWorkflow
+    // calls in a row, none of these share a coalescing key, so each gets
+    // its own undo step regardless of timing.
+    const store = useWorkflowStore.getState();
+    store.renameWorkflow("First");
+    store.moveNode("A", { x: 999, y: 999 });
+    store.addNode({ type: "action", label: "N1", config: { kind: "send_email" } });
+
+    store.undo();
+    expect(
+      useWorkflowStore.getState().workflow.nodes.some((node) => node.data.label === "N1"),
+    ).toBe(false);
+
+    store.undo();
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "A")?.position,
+    ).toEqual({ x: 0, y: 0 });
+
+    store.undo();
+    expect(useWorkflowStore.getState().workflow.name).toBe("Test Workflow");
+  });
+
+  it("discrete actions (addNode) never coalesce, even called back to back", () => {
+    const store = useWorkflowStore.getState();
+    store.addNode({ type: "action", label: "N1", config: { kind: "send_email" } });
+    store.addNode({ type: "action", label: "N2", config: { kind: "send_email" } });
+
+    expect(useWorkflowStore.getState().past).toHaveLength(2);
+  });
+
+  it("coalesces rapid edits to the same node into a single undo step", () => {
+    const store = useWorkflowStore.getState();
+    store.updateNode("A", { label: "First edit" });
+    store.updateNode("A", { label: "Second edit" });
+
+    expect(useWorkflowStore.getState().past).toHaveLength(1);
+
+    store.undo();
+
+    // One undo restores all the way back to before the *first* keystroke,
+    // not just the most recent one -- that's the point of coalescing.
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "A")?.data.label,
+    ).toBe("A");
+  });
+
+  it("does not coalesce edits to two different nodes", () => {
+    const store = useWorkflowStore.getState();
+    store.updateNode("A", { label: "Edited A" });
+    store.updateNode("B", { label: "Edited B" });
+
+    expect(useWorkflowStore.getState().past).toHaveLength(2);
+
+    store.undo();
+
+    // Only B's edit is undone -- A's is a separate, earlier step.
+    const nodes = useWorkflowStore.getState().workflow.nodes;
+    expect(nodes.find((node) => node.id === "A")?.data.label).toBe("Edited A");
+    expect(nodes.find((node) => node.id === "B")?.data.label).toBe("B");
+  });
+
+  it("does not coalesce edits separated by more than the coalescing window", () => {
+    vi.useFakeTimers();
+    try {
+      const store = useWorkflowStore.getState();
+      store.updateNode("A", { label: "First edit" });
+      vi.advanceTimersByTime(900);
+      store.updateNode("A", { label: "Second edit" });
+
+      expect(useWorkflowStore.getState().past).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a different action type in between breaks coalescing, even for the same node", () => {
+    const store = useWorkflowStore.getState();
+    store.updateNode("A", { label: "Edited label" });
+    store.updateNodeConfig("A", { kind: "schedule", cron: "0 9 * * *" });
+
+    expect(useWorkflowStore.getState().past).toHaveLength(2);
+  });
+
+  it("clears the selection on undo if the restored workflow no longer has that node", () => {
+    const store = useWorkflowStore.getState();
+    store.addNode({ type: "action", label: "New", config: { kind: "send_email" } });
+    const newNodeId = useWorkflowStore
+      .getState()
+      .workflow.nodes.find((node) => node.data.label === "New")!.id;
+    useWorkflowStore.setState({ selectedNodeId: newNodeId });
+
+    store.undo();
+
+    expect(useWorkflowStore.getState().selectedNodeId).toBeNull();
+  });
+
+  it("leaves the selection alone on redo when the restored node still exists", () => {
+    const store = useWorkflowStore.getState();
+    store.addNode({ type: "action", label: "New", config: { kind: "send_email" } });
+    store.undo();
+    useWorkflowStore.setState({ selectedNodeId: "A" });
+
+    store.redo(); // "New" comes back; "A" was already there both before and after
+
+    expect(useWorkflowStore.getState().selectedNodeId).toBe("A");
+  });
+
+  it("clears the selection on redo if the workflow being restored doesn't have that node", () => {
+    const store = useWorkflowStore.getState();
+    useWorkflowStore.setState({ selectedNodeId: "A" });
+    store.deleteNode("A"); // deleteNode's own logic already clears selection here
+    store.undo(); // "A" exists again, but selection stays null -- undo never re-selects
+    useWorkflowStore.setState({ selectedNodeId: "A" }); // select it again by hand
+
+    store.redo(); // re-applies the delete: "A" is gone once more
+
+    expect(useWorkflowStore.getState().selectedNodeId).toBeNull();
+  });
+
+  it("genuine no-ops (an unknown id) do not create an undo step", () => {
+    const store = useWorkflowStore.getState();
+    store.updateNode("does-not-exist", { label: "X" });
+
+    expect(useWorkflowStore.getState().past).toEqual([]);
   });
 });
