@@ -403,6 +403,39 @@ test("a payload field's type selector produces a real number Run can compare num
   );
 });
 
+test("equals matches a True/False payload field against its typed-out string", async ({
+  page,
+}) => {
+  // Equals compares against a string (Value is always text), but a payload
+  // field can be a real boolean -- this is the coercion in evaluate.ts that
+  // makes `active equals "true"` match a real `true`, not just the string.
+  await page.locator('[data-id="trigger-new-customer"]').click();
+
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await inspector.getByRole("button", { name: "Add field" }).click();
+  await inspector.getByLabel("Field 4 name").fill("active");
+  await inspector.getByLabel("Field 4 type").selectOption("boolean");
+
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".react-flow__node-condition").click();
+  await inspector.getByLabel("Field").fill("active");
+  await inspector.getByLabel("Value").fill("true");
+
+  await connectHandles(
+    page,
+    page.locator('[data-id="trigger-new-customer"] .react-flow__handle-right'),
+    page.locator(".react-flow__node-condition .react-flow__handle.target"),
+  );
+
+  await page.getByRole("button", { name: "Run workflow" }).click();
+
+  const panel = page.getByRole("region", { name: "Run results" });
+  await expect(panel).toContainText(
+    'Checked whether "active" equals "true" -- it was true',
+  );
+});
+
 test("Run evaluates the seed trigger's sample payload and badges the right branch", async ({
   page,
 }) => {

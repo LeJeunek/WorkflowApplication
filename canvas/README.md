@@ -89,7 +89,7 @@ A `WorkflowEdge` connects two nodes; an edge leaving a Condition must name which
 
 A trigger's `samplePayload` is edited as a row per dot-path field (`customer.plan` → `pro`) by default — no JSON syntax required — with an "Advanced (JSON)" tab for anything the row editor can't express, like arrays. Each row also carries an explicit type (Text / Number / True-False / Empty / JSON), picked from a dropdown rather than guessed from what's typed — so getting a real `42` or `true` into the payload doesn't depend on knowing you can omit the quotes. Both views edit the same underlying text; `domain/samplePayload.ts` flattens it into rows and rebuilds it from them.
 
-Only `greater_than`/`less_than` numerically coerce both sides of a comparison; `equals`/`not_equals` compare with strict `===` against the Condition's Value field, which is always a string. A payload field typed as Number or True/False will not match an `equals` check against `"42"` or `"true"` — use `greater_than`/`less_than` for numeric comparisons, or `contains` (which stringifies first).
+Every operator coerces the payload side of the comparison, since a Condition's Value field is always a string but the payload field it's checked against isn't: `equals`/`not_equals`/`contains` stringify it (so a Number or True/False field matches `"42"`/`"true"`), `greater_than`/`less_than` run both sides through `Number(...)`. A missing field is treated as `""`, not the literal text `"undefined"`.
 
 ## The execution engine
 

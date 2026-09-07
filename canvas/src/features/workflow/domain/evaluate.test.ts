@@ -43,6 +43,35 @@ describe("evaluateCondition", () => {
         evaluateCondition(condition("plan", "equals", "Pro"), { plan: "pro" }),
       ).toBe(false);
     });
+
+    it("coerces a non-string actual value before comparing", () => {
+      // config.value is always a string (ConditionConfig.value: string),
+      // but a payload field can be a real number, boolean, or null (see the
+      // simple payload editor's per-field type) -- equals has to be able to
+      // check those, not just genuine strings.
+      expect(
+        evaluateCondition(condition("seats", "equals", "42"), { seats: 42 }),
+      ).toBe(true);
+      expect(
+        evaluateCondition(condition("active", "equals", "true"), {
+          active: true,
+        }),
+      ).toBe(true);
+      expect(
+        evaluateCondition(condition("active", "not_equals", "true"), {
+          active: false,
+        }),
+      ).toBe(true);
+    });
+
+    it("treats a missing field as an empty string, matching an empty Value", () => {
+      expect(
+        evaluateCondition(condition("missing", "equals", ""), {}),
+      ).toBe(true);
+      expect(
+        evaluateCondition(condition("missing", "not_equals", ""), {}),
+      ).toBe(false);
+    });
   });
 
   describe("contains", () => {
