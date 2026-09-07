@@ -89,12 +89,12 @@ describe("Inspector", () => {
     ).toEqual({ kind: "event", event: "customer.updated" });
   });
 
-  it("shows and edits the trigger's Sample payload field", () => {
+  it("shows and edits the trigger's Example data field", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);
 
     const samplePayload = screen.getByLabelText(
-      "Sample payload",
+      "Example data",
     ) as HTMLTextAreaElement;
     expect(samplePayload.value).toBe("");
 
@@ -113,7 +113,7 @@ describe("Inspector", () => {
     });
   });
 
-  it("editing Event does not clobber an existing Sample payload", () => {
+  it("editing Event does not clobber an existing Example data", () => {
     useWorkflowStore.setState({
       workflow: {
         ...BASE_WORKFLOW,
@@ -152,7 +152,7 @@ describe("Inspector", () => {
     });
   });
 
-  it("switching the trigger's Kind does not clobber an existing Sample payload", () => {
+  it("switching the trigger's Kind does not clobber an existing Example data", () => {
     // samplePayload isn't tied to any one kind -- the same field, same
     // meaning, on event/schedule/form_submission alike -- so switching
     // Kind has no reason to lose it, unlike event/cron/formName which
@@ -195,30 +195,30 @@ describe("Inspector", () => {
     });
   });
 
-  it("shows an inline error for invalid JSON in Sample payload, and clears it once fixed", () => {
+  it("shows an inline error for invalid JSON in Example data, and clears it once fixed", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);
 
-    expect(screen.queryByText(/invalid json/i)).toBeNull();
+    expect(screen.queryByText(/valid json/i)).toBeNull();
 
-    const samplePayload = screen.getByLabelText("Sample payload");
+    const samplePayload = screen.getByLabelText("Example data");
     fireEvent.change(samplePayload, { target: { value: "{not valid" } });
-    expect(screen.getByText(/invalid json/i)).toBeDefined();
+    expect(screen.getByText(/valid json/i)).toBeDefined();
 
     fireEvent.change(samplePayload, { target: { value: '{"plan": "pro"}' } });
-    expect(screen.queryByText(/invalid json/i)).toBeNull();
+    expect(screen.queryByText(/valid json/i)).toBeNull();
   });
 
-  it("does not show an invalid-JSON error when Sample payload is cleared to empty", () => {
+  it("does not show an invalid-JSON error when Example data is cleared to empty", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);
 
-    const samplePayload = screen.getByLabelText("Sample payload");
+    const samplePayload = screen.getByLabelText("Example data");
     fireEvent.change(samplePayload, { target: { value: "{not valid" } });
-    expect(screen.getByText(/invalid json/i)).toBeDefined();
+    expect(screen.getByText(/valid json/i)).toBeDefined();
 
     fireEvent.change(samplePayload, { target: { value: "" } });
-    expect(screen.queryByText(/invalid json/i)).toBeNull();
+    expect(screen.queryByText(/valid json/i)).toBeNull();
   });
 
   it("shows and edits the action's Recipient field for the default Send email kind", () => {
@@ -242,7 +242,7 @@ describe("Inspector", () => {
     });
   });
 
-  it("switching the action's Kind to HTTP request replaces the config and shows URL and Method", () => {
+  it("switching the action's Kind to Call a website replaces the config and shows URL and Method", () => {
     useWorkflowStore.setState({ selectedNodeId: "action-1" });
     render(<Inspector />);
 
@@ -251,7 +251,7 @@ describe("Inspector", () => {
 
     expect(screen.queryByLabelText("Recipient")).toBeNull();
 
-    const url = screen.getByLabelText("URL") as HTMLInputElement;
+    const url = screen.getByLabelText("Web address") as HTMLInputElement;
     const method = screen.getByLabelText("Method") as HTMLSelectElement;
     expect(url.value).toBe("");
     expect(method.value).toBe("GET");

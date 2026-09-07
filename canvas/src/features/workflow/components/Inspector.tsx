@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { SlidersHorizontal } from "lucide-react";
 
 import { isSamplePayloadValid } from "../domain/execution";
@@ -11,6 +12,19 @@ import type {
   TriggerConfig,
   TriggerConfigKind,
 } from "../types";
+
+/**
+ * A one-line, plain-language explanation shown under a field, so someone
+ * unfamiliar with the underlying concept (JSON, cron, dot-paths, HTTP
+ * verbs) knows what to type without having to already know it.
+ */
+function FieldHint({ children }: { children: ReactNode }) {
+  return (
+    <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+      {children}
+    </p>
+  );
+}
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   trigger: "Trigger",
@@ -41,7 +55,7 @@ const TRIGGER_CONFIG_KIND_LABELS: Record<TriggerConfigKind, string> = {
 
 const ACTION_CONFIG_KIND_LABELS: Record<ActionConfigKind, string> = {
   send_email: "Send email",
-  http_request: "HTTP request",
+  http_request: "Call a website",
   add_tag: "Add tag",
   slack_message: "Slack message",
 };
@@ -120,27 +134,38 @@ function TriggerConfigFields({
 
         <input
           type="text"
+          aria-label="Event"
           value={config.event}
+          placeholder="customer.created"
           onChange={(event) =>
             onChange({ ...config, event: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>
+          A short name for what just happened, like{" "}
+          <code>customer.created</code> or <code>order.placed</code>.
+        </FieldHint>
       </label>
     ) : config.kind === "schedule" ? (
       <label className="block">
-        <span className="mb-1 block text-xs text-ink-faint">
-          Cron expression
-        </span>
+        <span className="mb-1 block text-xs text-ink-faint">Schedule</span>
 
         <input
           type="text"
+          aria-label="Schedule"
           value={config.cron}
+          placeholder="0 9 * * *"
           onChange={(event) =>
             onChange({ ...config, cron: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>
+          When this should run, in cron format. <code>0 9 * * *</code> means
+          every day at 9am; <code>*/30 * * * *</code> means every 30
+          minutes.
+        </FieldHint>
       </label>
     ) : (
       <label className="block">
@@ -148,12 +173,15 @@ function TriggerConfigFields({
 
         <input
           type="text"
+          aria-label="Form name"
           value={config.formName}
+          placeholder="Contact form"
           onChange={(event) =>
             onChange({ ...config, formName: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>The name of the form that was submitted.</FieldHint>
       </label>
     );
 
@@ -165,10 +193,11 @@ function TriggerConfigFields({
 
       <label className="block">
         <span className="mb-1 block text-xs text-ink-faint">
-          Sample payload
+          Example data
         </span>
 
         <textarea
+          aria-label="Example data"
           aria-invalid={!samplePayloadValid}
           value={config.samplePayload ?? ""}
           onChange={(event) =>
@@ -179,10 +208,16 @@ function TriggerConfigFields({
           className="w-full resize-none rounded-md border border-line bg-elevated px-2 py-1.5 font-mono text-xs leading-relaxed text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
 
-        {!samplePayloadValid && (
+        {samplePayloadValid ? (
+          <FieldHint>
+            Not real data -- just a stand-in used when you click Run, so you
+            can see how this workflow would behave.
+          </FieldHint>
+        ) : (
           <p className="mt-1 text-[11px] text-danger">
-            Invalid JSON -- Run will use an empty payload until this is
-            fixed.
+            This isn't valid JSON, so Run will treat it as empty until it's
+            fixed. Data goes in curly braces, e.g.{" "}
+            <code>{'{"plan": "pro"}'}</code>.
           </p>
         )}
       </label>
@@ -205,12 +240,15 @@ function ActionConfigFields({
 
         <input
           type="text"
+          aria-label="Recipient"
           value={config.recipient ?? ""}
+          placeholder="name@example.com"
           onChange={(event) =>
             onChange({ ...config, recipient: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>Who the simulated email would be sent to.</FieldHint>
       </label>
     );
   }
@@ -219,22 +257,28 @@ function ActionConfigFields({
     return (
       <>
         <label className="block">
-          <span className="mb-1 block text-xs text-ink-faint">URL</span>
+          <span className="mb-1 block text-xs text-ink-faint">
+            Web address
+          </span>
 
           <input
             type="text"
+            aria-label="Web address"
             value={config.url}
+            placeholder="https://example.com/webhook"
             onChange={(event) =>
               onChange({ ...config, url: event.target.value })
             }
             className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
           />
+          <FieldHint>The website or service this would contact.</FieldHint>
         </label>
 
         <label className="block">
           <span className="mb-1 block text-xs text-ink-faint">Method</span>
 
           <select
+            aria-label="Method"
             value={config.method}
             onChange={(event) =>
               onChange({
@@ -247,6 +291,10 @@ function ActionConfigFields({
             <option value="GET">GET</option>
             <option value="POST">POST</option>
           </select>
+          <FieldHint>
+            <strong>GET</strong> asks the website for information.{" "}
+            <strong>POST</strong> sends new information to it.
+          </FieldHint>
         </label>
       </>
     );
@@ -259,12 +307,17 @@ function ActionConfigFields({
 
         <input
           type="text"
+          aria-label="Tag"
           value={config.tag}
+          placeholder="vip"
           onChange={(event) =>
             onChange({ ...config, tag: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>
+          A short label to attach, for organizing or filtering later.
+        </FieldHint>
       </label>
     );
   }
@@ -276,12 +329,17 @@ function ActionConfigFields({
 
         <input
           type="text"
+          aria-label="Channel"
           value={config.channel}
+          placeholder="#general"
           onChange={(event) =>
             onChange({ ...config, channel: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>
+          Which Slack channel the simulated message would be posted to.
+        </FieldHint>
       </label>
 
       <label className="block">
@@ -289,12 +347,15 @@ function ActionConfigFields({
 
         <input
           type="text"
+          aria-label="Message"
           value={config.message}
+          placeholder="Welcome to the team!"
           onChange={(event) =>
             onChange({ ...config, message: event.target.value })
           }
           className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
         />
+        <FieldHint>The text of the simulated message.</FieldHint>
       </label>
     </>
   );
@@ -350,6 +411,9 @@ export function Inspector() {
                 }
                 className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
               />
+              <FieldHint>
+                A name to help you recognize this step on the canvas.
+              </FieldHint>
             </section>
             {selectedNode.data.description !== undefined && (
               <section>
@@ -374,6 +438,9 @@ export function Inspector() {
               <section>
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
                   Configuration
+                </p>
+                <p className="mb-3 text-xs leading-relaxed text-ink-muted">
+                  Decides what starts this workflow.
                 </p>
 
                 <div className="space-y-3">
@@ -402,6 +469,9 @@ export function Inspector() {
                         </option>
                       ))}
                     </select>
+                    <FieldHint>
+                      The kind of thing that starts this workflow.
+                    </FieldHint>
                   </label>
 
                   <TriggerConfigFields
@@ -417,6 +487,9 @@ export function Inspector() {
               <section>
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
                   Configuration
+                </p>
+                <p className="mb-3 text-xs leading-relaxed text-ink-muted">
+                  Decides what happens when this step runs.
                 </p>
 
                 <div className="space-y-3">
@@ -444,6 +517,7 @@ export function Inspector() {
                         </option>
                       ))}
                     </select>
+                    <FieldHint>What this step actually does.</FieldHint>
                   </label>
 
                   <ActionConfigFields
@@ -460,6 +534,9 @@ export function Inspector() {
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
                   Configuration
                 </p>
+                <p className="mb-3 text-xs leading-relaxed text-ink-muted">
+                  Decides which path the workflow takes next.
+                </p>
 
                 <div className="space-y-3">
                   <label className="block">
@@ -469,7 +546,9 @@ export function Inspector() {
 
                     <input
                       type="text"
+                      aria-label="Field"
                       value={selectedNode.data.config.field}
+                      placeholder="customer.plan"
                       onChange={(event) =>
                         updateNodeConfig(selectedNode.id, {
                           ...selectedNode.data.config,
@@ -478,6 +557,11 @@ export function Inspector() {
                       }
                       className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
                     />
+                    <FieldHint>
+                      The piece of information to check, e.g.{" "}
+                      <code>customer.plan</code>. Use a dot to look inside
+                      nested data.
+                    </FieldHint>
                   </label>
 
                   <label className="block">
@@ -486,6 +570,7 @@ export function Inspector() {
                     </span>
 
                     <select
+                      aria-label="Operator"
                       value={selectedNode.data.config.operator}
                       onChange={(event) =>
                         updateNodeConfig(selectedNode.id, {
@@ -505,6 +590,9 @@ export function Inspector() {
                         </option>
                       ))}
                     </select>
+                    <FieldHint>
+                      How to compare the field above to the value below.
+                    </FieldHint>
                   </label>
 
                   <label className="block">
@@ -514,7 +602,9 @@ export function Inspector() {
 
                     <input
                       type="text"
+                      aria-label="Value"
                       value={selectedNode.data.config.value}
+                      placeholder="pro"
                       onChange={(event) =>
                         updateNodeConfig(selectedNode.id, {
                           ...selectedNode.data.config,
@@ -523,6 +613,9 @@ export function Inspector() {
                       }
                       className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
                     />
+                    <FieldHint>
+                      What to compare the field against.
+                    </FieldHint>
                   </label>
                 </div>
               </section>
