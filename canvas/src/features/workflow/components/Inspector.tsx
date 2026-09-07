@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { SlidersHorizontal } from "lucide-react";
 
-import { isSamplePayloadValid } from "../domain/execution";
 import { useWorkflowStore } from "../state/workflowStore";
 import { ACTION_CONFIG_KINDS, CONDITION_OPERATORS, TRIGGER_CONFIG_KINDS } from "../types";
 import type {
@@ -12,13 +11,14 @@ import type {
   TriggerConfig,
   TriggerConfigKind,
 } from "../types";
+import { SamplePayloadEditor } from "./SamplePayloadEditor";
 
 /**
  * A one-line, plain-language explanation shown under a field, so someone
  * unfamiliar with the underlying concept (JSON, cron, dot-paths, HTTP
  * verbs) knows what to type without having to already know it.
  */
-function FieldHint({ children }: { children: ReactNode }) {
+export function FieldHint({ children }: { children: ReactNode }) {
   return (
     <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
       {children}
@@ -185,42 +185,20 @@ function TriggerConfigFields({
       </label>
     );
 
-  const samplePayloadValid = isSamplePayloadValid(config.samplePayload);
-
   return (
     <>
       {kindField}
 
-      <label className="block">
+      <div>
         <span className="mb-1 block text-xs text-ink-faint">
           Example data
         </span>
 
-        <textarea
-          aria-label="Example data"
-          aria-invalid={!samplePayloadValid}
-          value={config.samplePayload ?? ""}
-          onChange={(event) =>
-            onChange({ ...config, samplePayload: event.target.value })
-          }
-          rows={4}
-          spellCheck={false}
-          className="w-full resize-none rounded-md border border-line bg-elevated px-2 py-1.5 font-mono text-xs leading-relaxed text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+        <SamplePayloadEditor
+          samplePayload={config.samplePayload}
+          onChange={(samplePayload) => onChange({ ...config, samplePayload })}
         />
-
-        {samplePayloadValid ? (
-          <FieldHint>
-            Not real data -- just a stand-in used when you click Run, so you
-            can see how this workflow would behave.
-          </FieldHint>
-        ) : (
-          <p className="mt-1 text-[11px] text-danger">
-            This isn't valid JSON, so Run will treat it as empty until it's
-            fixed. Data goes in curly braces, e.g.{" "}
-            <code>{'{"plan": "pro"}'}</code>.
-          </p>
-        )}
-      </label>
+      </div>
     </>
   );
 }
@@ -475,6 +453,7 @@ export function Inspector() {
                   </label>
 
                   <TriggerConfigFields
+                    key={selectedNode.id}
                     config={selectedNode.data.config}
                     onChange={(config) =>
                       updateNodeConfig(selectedNode.id, config)

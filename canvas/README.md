@@ -87,6 +87,8 @@ The payoff: the entire execution engine (evaluate → execute) was built and ful
 
 A `WorkflowEdge` connects two nodes; an edge leaving a Condition must name which output it's from (`sourceHandle: "true" | "false"`) — every other node type has exactly one unnamed output. Both branches of a condition are allowed to reach the same downstream node.
 
+A trigger's `samplePayload` is edited as a row per dot-path field (`customer.plan` → `pro`) by default — no JSON syntax required — with an "Advanced (JSON)" tab for anything the row editor can't express, like arrays. Both views edit the same underlying text; `domain/samplePayload.ts` flattens it into rows and rebuilds it from them.
+
 ## The execution engine
 
 Clicking **Run** does not call anything real — it's a synchronous, in-memory simulation:

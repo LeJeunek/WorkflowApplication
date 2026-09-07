@@ -89,9 +89,11 @@ describe("Inspector", () => {
     ).toEqual({ kind: "event", event: "customer.updated" });
   });
 
-  it("shows and edits the trigger's Example data field", () => {
+  it("shows and edits the trigger's Example data field via the Advanced (JSON) textarea", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
 
     const samplePayload = screen.getByLabelText(
       "Example data",
@@ -199,6 +201,8 @@ describe("Inspector", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
+
     expect(screen.queryByText(/valid json/i)).toBeNull();
 
     const samplePayload = screen.getByLabelText("Example data");
@@ -212,6 +216,8 @@ describe("Inspector", () => {
   it("does not show an invalid-JSON error when Example data is cleared to empty", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
 
     const samplePayload = screen.getByLabelText("Example data");
     fireEvent.change(samplePayload, { target: { value: "{not valid" } });

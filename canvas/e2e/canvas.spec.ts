@@ -333,6 +333,43 @@ test("a renamed workflow and an added node survive a page reload", async ({
   await expect(page.getByText("New Action")).toBeVisible();
 });
 
+test("the trigger's Example data defaults to a simple field editor, and editing a row changes what Run sees", async ({
+  page,
+}) => {
+  await page.locator('[data-id="trigger-new-customer"]').click();
+
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector.getByRole("button", { name: "Simple" })).toBeVisible();
+
+  // The seed payload -- { customer: { id, name, plan: "pro" } } -- shows up
+  // as one row per nested field, no JSON syntax required to see or edit it.
+  await expect(inspector.getByLabel("Field 1 name")).toHaveValue("customer.id");
+  await expect(inspector.getByLabel("Field 1 value")).toHaveValue("cust_001");
+  await expect(inspector.getByLabel("Field 3 name")).toHaveValue("customer.plan");
+  await expect(inspector.getByLabel("Field 3 value")).toHaveValue("pro");
+
+  await inspector.getByLabel("Field 3 value").fill("enterprise");
+
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".react-flow__node-condition").click();
+  await inspector.getByLabel("Field").fill("customer.plan");
+  await inspector.getByLabel("Value").fill("enterprise");
+
+  await connectHandles(
+    page,
+    page.locator('[data-id="trigger-new-customer"] .react-flow__handle-right'),
+    page.locator(".react-flow__node-condition .react-flow__handle.target"),
+  );
+
+  await page.getByRole("button", { name: "Run workflow" }).click();
+
+  const panel = page.getByRole("region", { name: "Run results" });
+  await expect(panel).toContainText(
+    'Checked whether "customer.plan" equals "enterprise"',
+  );
+});
+
 test("Run evaluates the seed trigger's sample payload and badges the right branch", async ({
   page,
 }) => {
