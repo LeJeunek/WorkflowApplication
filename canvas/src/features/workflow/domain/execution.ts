@@ -3,6 +3,8 @@ import { validateWorkflow } from "./validation";
 import type {
   ActionConfig,
   ConditionBranch,
+  ConditionConfig,
+  ConditionOperator,
   NodeRunResult,
   TriggerConfig,
   Workflow,
@@ -14,12 +16,31 @@ import type {
 function describeTrigger(config: TriggerConfig): string {
   switch (config.kind) {
     case "event":
-      return `Triggered by event "${config.event}".`;
+      return `Started by the "${config.event}" event.`;
     case "schedule":
-      return `Triggered by schedule "${config.cron}".`;
+      return `Started on schedule ("${config.cron}").`;
     case "form_submission":
-      return `Triggered by form submission "${config.formName}".`;
+      return `Started by the "${config.formName}" form being submitted.`;
   }
+}
+
+/**
+ * Plain-English phrase for each {@link ConditionOperator}, used to narrate a
+ * condition step ("customer.plan <phrase> "pro"") rather than showing the
+ * raw operator name.
+ */
+const CONDITION_OPERATOR_PHRASES: Record<ConditionOperator, string> = {
+  equals: "equals",
+  not_equals: "does not equal",
+  contains: "contains",
+  greater_than: "is greater than",
+  less_than: "is less than",
+};
+
+/** Narrates what a condition checked and which way it went, rather than just reporting the boolean. */
+function describeCondition(config: ConditionConfig, matched: boolean): string {
+  const branchLabel = matched ? "True" : "False";
+  return `Checked whether "${config.field}" ${CONDITION_OPERATOR_PHRASES[config.operator]} "${config.value}" -- it was ${matched}, so this took the ${branchLabel} path.`;
 }
 
 /** Exhaustive over {@link ActionConfig}'s `kind`, same reasoning as {@link describeTrigger}. */
@@ -157,17 +178,13 @@ export function runWorkflow(workflow: Workflow): NodeRunResult[] {
     const outgoing = outgoingByNode.get(nodeId) ?? [];
 
     if (node.type === "condition") {
-      const takenBranch: ConditionBranch = evaluateCondition(
-        node.data.config,
-        payload,
-      )
-        ? "true"
-        : "false";
+      const matched = evaluateCondition(node.data.config, payload);
+      const takenBranch: ConditionBranch = matched ? "true" : "false";
 
       steps.push({
         nodeId,
         status: "success",
-        detail: `Evaluated to ${takenBranch} -- took the ${takenBranch} branch.`,
+        detail: describeCondition(node.data.config, matched),
       });
 
       for (const edge of outgoing) {
@@ -216,7 +233,7 @@ export function runWorkflow(workflow: Workflow): NodeRunResult[] {
       steps.push({
         nodeId,
         status: "skipped",
-        detail: "Not reached: the branch leading here was not taken.",
+        detail: "This step was skipped because the workflow took a different path.",
       });
     }
   }

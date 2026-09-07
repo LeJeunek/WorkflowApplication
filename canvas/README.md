@@ -93,12 +93,17 @@ Clicking **Run** does not call anything real — it's a synchronous, in-memory s
 
 1. `runWorkflow` (in `domain/execution.ts`) reads the workflow's first trigger's `samplePayload`, parsing it (falling back to `{}` on invalid or absent JSON — an unconfigured sample payload is a normal state, not an error).
 2. It walks the graph from every trigger node. At a Condition node, `evaluateCondition` decides which branch is taken; only that branch is actually followed.
-3. Every node reached is recorded as a step with a status (`success` / `failure` / `skipped`) and a human-readable, kind-aware detail (`Sent a Slack message to "#general".`, `Evaluated to true -- took the true branch.`).
+3. Every node reached is recorded as a step with a status (`success` / `failure` / `skipped`) and a human-readable, kind-aware detail written in plain language, not programmer-speak — `Sent a Slack message to "#general".`, `Checked whether "customer.plan" equals "pro" -- it was true, so this took the True path.`.
 4. Nodes downstream of the branch that *wasn't* taken are walked separately and recorded as `skipped`, so the whole untaken subtree shows up — not just the first node in it.
 
 The result (`lastRun`) is deliberately excluded from persistence: a stale run showing green checkmarks on nodes that have since been edited or deleted would misrepresent the current workflow, not describe it.
 
-`WorkflowNode` reads `lastRun` directly from the store and renders a status badge per node, with the step's own detail text as its accessible name (`role="status"`, `aria-label`) — so the "why" behind a skip or a success is available by inspecting the badge, not hidden in a separate panel.
+Two places surface it, both reading `lastRun` directly from the store:
+
+- **`RunResultsPanel`** — a dismissible strip that appears below the header the moment Run finishes, listing every step in order with its status and detail. This is the primary "what did that actually do" answer, deliberately hard to miss right after clicking Run.
+- **`WorkflowNode`** — a small status badge per node (`role="status"`, `aria-label` built from the step's own detail), for checking one node's result in place on the canvas without opening the panel.
+
+Both read the same `RUN_STATUS_PRESENTATION` map (`components/runStatusPresentation.ts`) for their icon and color per status, so "success" looks identical everywhere rather than two independently-drifting copies of the same mapping.
 
 ## Validation
 

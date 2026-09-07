@@ -490,3 +490,23 @@ test("a corrupted saved workflow is flagged as invalid and Run is disabled", asy
     /references a node that no longer exists/,
   );
 });
+
+test("Run shows a dismissible results panel listing every step in plain language", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Run workflow" }).click();
+
+  const panel = page.getByRole("region", { name: "Run results" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("1 succeeded");
+  await expect(panel).toContainText("New Customer");
+  await expect(panel).toContainText('Started by the "customer.created" event.');
+
+  await page.getByRole("button", { name: "Dismiss run results" }).click();
+  await expect(panel).toBeHidden();
+
+  // A fresh run reopens the panel even though the previous one was
+  // dismissed -- dismissal is per-run, not a permanent "never show again".
+  await page.getByRole("button", { name: "Run workflow" }).click();
+  await expect(page.getByRole("region", { name: "Run results" })).toBeVisible();
+});

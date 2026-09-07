@@ -239,6 +239,60 @@ describe("runWorkflow", () => {
 
     expect(conditionStep?.detail).toContain("true");
   });
+
+  it("narrates a condition's field, operator, and value in plain language", () => {
+    const workflow = buildWorkflow(
+      [trigger("A", { plan: "pro" }), condition("C", "plan", "equals", "pro")],
+      [edge("A", "C")],
+    );
+
+    const steps = runWorkflow(workflow);
+    const conditionStep = steps.find((step) => step.nodeId === "C");
+
+    expect(conditionStep?.detail).toBe(
+      'Checked whether "plan" equals "pro" -- it was true, so this took the True path.',
+    );
+  });
+
+  it("narrates a failed comparison and the False path taken", () => {
+    const workflow = buildWorkflow(
+      [
+        trigger("A", { plan: "free" }),
+        condition("C", "plan", "contains", "pro"),
+      ],
+      [edge("A", "C")],
+    );
+
+    const steps = runWorkflow(workflow);
+    const conditionStep = steps.find((step) => step.nodeId === "C");
+
+    expect(conditionStep?.detail).toBe(
+      'Checked whether "plan" contains "pro" -- it was false, so this took the False path.',
+    );
+  });
+
+  it("describes a skipped step in plain language", () => {
+    const workflow = buildWorkflow(
+      [
+        trigger("A", { plan: "pro" }),
+        condition("C", "plan", "equals", "pro"),
+        action("True1"),
+        action("False1"),
+      ],
+      [
+        edge("A", "C"),
+        edge("C", "True1", "true"),
+        edge("C", "False1", "false"),
+      ],
+    );
+
+    const steps = runWorkflow(workflow);
+    const skippedStep = steps.find((step) => step.nodeId === "False1");
+
+    expect(skippedStep?.detail).toBe(
+      "This step was skipped because the workflow took a different path.",
+    );
+  });
 });
 
 describe("isSamplePayloadValid", () => {
@@ -290,7 +344,7 @@ describe("trigger and action step detail text", () => {
       },
     });
 
-    expect(detail).toBe('Triggered by form submission "Signup".');
+    expect(detail).toBe('Started by the "Signup" form being submitted.');
   });
 
   it("describes a send_email action, with and without a recipient", () => {

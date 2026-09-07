@@ -1,10 +1,11 @@
 import { Handle, Position } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
-import { Check, Cog, GitBranch, Minus, X, Zap } from 'lucide-react';
+import { Cog, GitBranch, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { RUN_STATUS_PRESENTATION } from './runStatusPresentation';
 import { useWorkflowStore } from '../state/workflowStore';
 import { CONDITION_BRANCHES } from '../types';
-import type { NodeRunStatus, NodeType } from '../types';
+import type { NodeType } from '../types';
 
 /**
  * The slice of {@link NodeData} the renderer needs.
@@ -37,34 +38,6 @@ const NODE_PRESENTATION: Record<NodeType, NodePresentation> = {
   trigger: { kicker: 'Trigger', icon: Zap, tone: 'text-trigger' },
   action: { kicker: 'Action', icon: Cog, tone: 'text-action' },
   condition: { kicker: 'Condition', icon: GitBranch, tone: 'text-condition' },
-};
-
-interface RunStatusPresentation {
-  icon: LucideIcon;
-  /** Background + icon colour for the badge itself. */
-  badgeClassName: string;
-  /** Prefixes the step's own detail text as the badge's accessible name. */
-  label: string;
-}
-
-/**
- * Exhaustive over {@link NodeRunStatus}, same reasoning as
- * {@link NODE_PRESENTATION}: a new status fails to compile here until it's
- * given an appearance, rather than silently rendering no badge at all.
- *
- * Reuses the `trigger` token's green for "success" -- this codebase
- * already treats that colour as a generic affirmative signal (see the
- * "Saved" checkmarks in WorkflowHeader/WorkflowStatusBar), not something
- * scoped to trigger nodes specifically.
- */
-const RUN_STATUS_PRESENTATION: Record<NodeRunStatus, RunStatusPresentation> = {
-  success: { icon: Check, badgeClassName: 'bg-trigger text-base', label: 'Succeeded' },
-  failure: { icon: X, badgeClassName: 'bg-danger text-base', label: 'Failed' },
-  skipped: {
-    icon: Minus,
-    badgeClassName: 'bg-elevated text-ink-faint ring-1 ring-line',
-    label: 'Skipped',
-  },
 };
 
 /**
