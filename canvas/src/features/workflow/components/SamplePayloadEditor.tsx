@@ -2,7 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 
 import { isSamplePayloadValid } from "../domain/execution";
-import { buildPayload, flattenPayload, nextFieldName } from "../domain/samplePayload";
+import {
+  PAYLOAD_FIELD_TYPES,
+  buildPayload,
+  defaultValueForType,
+  flattenPayload,
+  nextFieldName,
+} from "../domain/samplePayload";
+import type { PayloadFieldType } from "../domain/samplePayload";
 import { FieldHint } from "./Inspector";
 
 const TAB_BASE_CLASSES =
@@ -10,12 +17,24 @@ const TAB_BASE_CLASSES =
 const TAB_ACTIVE_CLASSES = "bg-surface text-ink shadow-sm";
 const TAB_INACTIVE_CLASSES = "text-ink-faint hover:text-ink";
 
+const INPUT_CLASSES =
+  "w-0 flex-1 rounded-md border border-line bg-elevated px-2 py-1 font-mono text-xs text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30";
+
+const PAYLOAD_FIELD_TYPE_LABELS: Record<PayloadFieldType, string> = {
+  text: "Text",
+  number: "Number",
+  boolean: "True/False",
+  null: "Empty",
+  json: "JSON",
+};
+
 /**
  * Editor for a trigger's `samplePayload`. Defaults to a field-by-field
- * "Simple" view -- a row per dot-path key, so someone unfamiliar with JSON
- * syntax never has to type a brace or a quote -- with an "Advanced" raw-JSON
- * view underneath it for anything the row editor can't express (arrays,
- * hand-crafted structures). Both views edit the exact same underlying text;
+ * "Simple" view -- a row per dot-path key with an explicit type, so someone
+ * unfamiliar with JSON syntax never has to type a brace, a quote, or an
+ * unquoted `true` to get a real boolean -- with an "Advanced" raw-JSON view
+ * underneath it for anything the row editor can't express (arrays, hand-
+ * crafted structures). Both views edit the exact same underlying text;
  * neither is the "real" one.
  */
 export function SamplePayloadEditor({
@@ -54,12 +73,29 @@ export function SamplePayloadEditor({
 
   function handleAddRow() {
     focusRowIndexRef.current = rows.length;
-    onChange(buildPayload([...rows, { path: nextFieldName(rows), value: "" }]));
+    onChange(
+      buildPayload([
+        ...rows,
+        { path: nextFieldName(rows), type: "text", value: "" },
+      ]),
+    );
   }
 
   function handlePathChange(index: number, path: string) {
     onChange(
       buildPayload(rows.map((row, i) => (i === index ? { ...row, path } : row))),
+    );
+  }
+
+  function handleTypeChange(index: number, type: PayloadFieldType) {
+    onChange(
+      buildPayload(
+        rows.map((row, i) =>
+          i === index
+            ? { ...row, type, value: defaultValueForType(type, row.value) }
+            : row,
+        ),
+      ),
     );
   }
 
@@ -110,34 +146,78 @@ export function SamplePayloadEditor({
           )}
 
           {rows.map((row, index) => (
-            <div key={index} className="flex items-center gap-1.5">
-              <input
-                ref={(el) => {
-                  pathInputRefs.current[index] = el;
-                }}
-                type="text"
-                aria-label={`Field ${index + 1} name`}
-                value={row.path}
-                placeholder="customer.plan"
-                onChange={(event) => handlePathChange(index, event.target.value)}
-                className="w-0 flex-1 rounded-md border border-line bg-elevated px-2 py-1 font-mono text-xs text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-              />
-              <input
-                type="text"
-                aria-label={`Field ${index + 1} value`}
-                value={row.value}
-                placeholder="pro"
-                onChange={(event) => handleValueChange(index, event.target.value)}
-                className="w-0 flex-1 rounded-md border border-line bg-elevated px-2 py-1 font-mono text-xs text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-              />
-              <button
-                type="button"
-                aria-label={`Remove field ${index + 1}`}
-                onClick={() => handleRemoveRow(index)}
-                className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:bg-elevated hover:text-danger"
-              >
-                <X className="size-3.5" aria-hidden="true" />
-              </button>
+            <div
+              key={index}
+              className="space-y-1.5 rounded-md border border-line p-1.5"
+            >
+              <div className="flex items-center gap-1.5">
+                <input
+                  ref={(el) => {
+                    pathInputRefs.current[index] = el;
+                  }}
+                  type="text"
+                  aria-label={`Field ${index + 1} name`}
+                  value={row.path}
+                  placeholder="customer.plan"
+                  onChange={(event) => handlePathChange(index, event.target.value)}
+                  className={INPUT_CLASSES}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove field ${index + 1}`}
+                  onClick={() => handleRemoveRow(index)}
+                  className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:bg-elevated hover:text-danger"
+                >
+                  <X className="size-3.5" aria-hidden="true" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <select
+                  aria-label={`Field ${index + 1} type`}
+                  value={row.type}
+                  onChange={(event) =>
+                    handleTypeChange(index, event.target.value as PayloadFieldType)
+                  }
+                  className="w-26 shrink-0 rounded-md border border-line bg-elevated px-1.5 py-1 text-[11px] text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+                >
+                  {PAYLOAD_FIELD_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {PAYLOAD_FIELD_TYPE_LABELS[type]}
+                    </option>
+                  ))}
+                </select>
+
+                {row.type === "boolean" ? (
+                  <select
+                    aria-label={`Field ${index + 1} value`}
+                    value={row.value}
+                    onChange={(event) => handleValueChange(index, event.target.value)}
+                    className={INPUT_CLASSES}
+                  >
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                ) : row.type === "null" ? (
+                  <input
+                    type="text"
+                    aria-label={`Field ${index + 1} value`}
+                    value="null"
+                    disabled
+                    className="w-0 flex-1 rounded-md border border-line bg-base px-2 py-1 font-mono text-xs text-ink-faint outline-none"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    inputMode={row.type === "number" ? "decimal" : undefined}
+                    aria-label={`Field ${index + 1} value`}
+                    value={row.value}
+                    placeholder={row.type === "json" ? '["vip","beta"]' : "pro"}
+                    onChange={(event) => handleValueChange(index, event.target.value)}
+                    className={INPUT_CLASSES}
+                  />
+                )}
+              </div>
             </div>
           ))}
 
@@ -153,7 +233,8 @@ export function SamplePayloadEditor({
           <FieldHint>
             Not real data -- just a stand-in used when you click Run, so you
             can see how this workflow would behave. Use a dot in the name to
-            nest data, like <code>customer.plan</code>.
+            nest data, like <code>customer.plan</code>, and pick a type so
+            Run sees a real number or true/false, not just text.
           </FieldHint>
         </div>
       ) : (

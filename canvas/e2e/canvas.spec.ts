@@ -370,6 +370,39 @@ test("the trigger's Example data defaults to a simple field editor, and editing 
   );
 });
 
+test("a payload field's type selector produces a real number Run can compare numerically", async ({
+  page,
+}) => {
+  await page.locator('[data-id="trigger-new-customer"]').click();
+
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await inspector.getByRole("button", { name: "Add field" }).click();
+
+  await inspector.getByLabel("Field 4 name").fill("seats");
+  await inspector.getByLabel("Field 4 type").selectOption("number");
+  await inspector.getByLabel("Field 4 value").fill("10");
+
+  await page.getByRole("button", { name: "Add Condition node" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".react-flow__node-condition").click();
+  await inspector.getByLabel("Field").fill("seats");
+  await inspector.getByLabel("Operator").selectOption("greater_than");
+  await inspector.getByLabel("Value").fill("5");
+
+  await connectHandles(
+    page,
+    page.locator('[data-id="trigger-new-customer"] .react-flow__handle-right'),
+    page.locator(".react-flow__node-condition .react-flow__handle.target"),
+  );
+
+  await page.getByRole("button", { name: "Run workflow" }).click();
+
+  const panel = page.getByRole("region", { name: "Run results" });
+  await expect(panel).toContainText(
+    'Checked whether "seats" is greater than "5" -- it was true',
+  );
+});
+
 test("Run evaluates the seed trigger's sample payload and badges the right branch", async ({
   page,
 }) => {

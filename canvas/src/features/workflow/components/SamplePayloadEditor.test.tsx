@@ -86,7 +86,7 @@ describe("SamplePayloadEditor", () => {
     ).toEqual({ customer: { plan: "pro" } });
   });
 
-  it("a value that's valid JSON is stored as its real type, not a string", () => {
+  it("a Text row keeps its value as a string even if it looks like a number", () => {
     render(<ControlledEditor initial={JSON.stringify({ seats: "x" })} />);
 
     fireEvent.change(screen.getByLabelText("Field 1 value"), {
@@ -96,7 +96,7 @@ describe("SamplePayloadEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
     expect(
       JSON.parse((screen.getByLabelText("Example data") as HTMLTextAreaElement).value),
-    ).toEqual({ seats: 5 });
+    ).toEqual({ seats: "5" });
   });
 
   it("removing a field deletes its row and its key", () => {
@@ -150,6 +150,111 @@ describe("SamplePayloadEditor", () => {
       screen.getByRole("button", { name: "Simple" }),
     ).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("Example data")).toBeDefined();
+  });
+
+  it("infers each row's type from its value, and shows it in the type selector", () => {
+    render(
+      <ControlledEditor
+        initial={JSON.stringify({
+          plan: "pro",
+          seats: 5,
+          active: true,
+          note: null,
+        })}
+      />,
+    );
+
+    expect(
+      (screen.getByLabelText("Field 1 type") as HTMLSelectElement).value,
+    ).toBe("text");
+    expect(
+      (screen.getByLabelText("Field 2 type") as HTMLSelectElement).value,
+    ).toBe("number");
+    expect(
+      (screen.getByLabelText("Field 3 type") as HTMLSelectElement).value,
+    ).toBe("boolean");
+    expect(
+      (screen.getByLabelText("Field 4 type") as HTMLSelectElement).value,
+    ).toBe("null");
+  });
+
+  it("switching a row's type to Number stores its value as a real number", () => {
+    render(<ControlledEditor initial={JSON.stringify({ seats: "x" })} />);
+
+    fireEvent.change(screen.getByLabelText("Field 1 type"), {
+      target: { value: "number" },
+    });
+    fireEvent.change(screen.getByLabelText("Field 1 value"), {
+      target: { value: "5" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
+    expect(
+      JSON.parse((screen.getByLabelText("Example data") as HTMLTextAreaElement).value),
+    ).toEqual({ seats: 5 });
+  });
+
+  it("switching a row's type to Number resets an incompatible value to 0", () => {
+    render(<ControlledEditor initial={JSON.stringify({ plan: "pro" })} />);
+
+    fireEvent.change(screen.getByLabelText("Field 1 type"), {
+      target: { value: "number" },
+    });
+
+    expect(
+      (screen.getByLabelText("Field 1 value") as HTMLInputElement).value,
+    ).toBe("0");
+  });
+
+  it("switching a row's type to True/False shows a True/False selector", () => {
+    render(<ControlledEditor initial={JSON.stringify({ active: "x" })} />);
+
+    fireEvent.change(screen.getByLabelText("Field 1 type"), {
+      target: { value: "boolean" },
+    });
+    const valueSelect = screen.getByLabelText("Field 1 value") as HTMLSelectElement;
+    expect(valueSelect.value).toBe("true");
+
+    fireEvent.change(valueSelect, { target: { value: "false" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
+    expect(
+      JSON.parse((screen.getByLabelText("Example data") as HTMLTextAreaElement).value),
+    ).toEqual({ active: false });
+  });
+
+  it("switching a row's type to Empty disables the value input and always writes null", () => {
+    render(<ControlledEditor initial={JSON.stringify({ note: "x" })} />);
+
+    fireEvent.change(screen.getByLabelText("Field 1 type"), {
+      target: { value: "null" },
+    });
+
+    const valueInput = screen.getByLabelText("Field 1 value") as HTMLInputElement;
+    expect(valueInput.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced (JSON)" }));
+    expect(
+      JSON.parse((screen.getByLabelText("Example data") as HTMLTextAreaElement).value),
+    ).toEqual({ note: null });
+  });
+
+  it("switching a row's type back and forth preserves a value that's valid for both", () => {
+    render(<ControlledEditor initial={JSON.stringify({ seats: 42 })} />);
+
+    fireEvent.change(screen.getByLabelText("Field 1 type"), {
+      target: { value: "text" },
+    });
+    expect(
+      (screen.getByLabelText("Field 1 value") as HTMLInputElement).value,
+    ).toBe("42");
+
+    fireEvent.change(screen.getByLabelText("Field 1 type"), {
+      target: { value: "number" },
+    });
+    expect(
+      (screen.getByLabelText("Field 1 value") as HTMLInputElement).value,
+    ).toBe("42");
   });
 
   it("keeps a non-object leaf (e.g. an array) intact as one row's JSON text", () => {

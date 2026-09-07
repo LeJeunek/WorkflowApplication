@@ -87,7 +87,9 @@ The payoff: the entire execution engine (evaluate → execute) was built and ful
 
 A `WorkflowEdge` connects two nodes; an edge leaving a Condition must name which output it's from (`sourceHandle: "true" | "false"`) — every other node type has exactly one unnamed output. Both branches of a condition are allowed to reach the same downstream node.
 
-A trigger's `samplePayload` is edited as a row per dot-path field (`customer.plan` → `pro`) by default — no JSON syntax required — with an "Advanced (JSON)" tab for anything the row editor can't express, like arrays. Both views edit the same underlying text; `domain/samplePayload.ts` flattens it into rows and rebuilds it from them.
+A trigger's `samplePayload` is edited as a row per dot-path field (`customer.plan` → `pro`) by default — no JSON syntax required — with an "Advanced (JSON)" tab for anything the row editor can't express, like arrays. Each row also carries an explicit type (Text / Number / True-False / Empty / JSON), picked from a dropdown rather than guessed from what's typed — so getting a real `42` or `true` into the payload doesn't depend on knowing you can omit the quotes. Both views edit the same underlying text; `domain/samplePayload.ts` flattens it into rows and rebuilds it from them.
+
+Only `greater_than`/`less_than` numerically coerce both sides of a comparison; `equals`/`not_equals` compare with strict `===` against the Condition's Value field, which is always a string. A payload field typed as Number or True/False will not match an `equals` check against `"42"` or `"true"` — use `greater_than`/`less_than` for numeric comparisons, or `contains` (which stringifies first).
 
 ## The execution engine
 
