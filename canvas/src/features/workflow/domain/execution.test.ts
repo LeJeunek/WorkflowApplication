@@ -415,3 +415,63 @@ describe("trigger and action step detail text", () => {
     expect(detail).toBe('Sent a Slack message to "#general".');
   });
 });
+
+describe("validate_order action", () => {
+  function runValidateOrder(order: Record<string, unknown> | undefined) {
+    const workflow = buildWorkflow(
+      [
+        trigger("A", order ? { order } : undefined),
+        {
+          id: "B",
+          type: "action",
+          position: { x: 0, y: 0 },
+          data: { label: "B", config: { kind: "validate_order" } },
+        },
+      ],
+      [edge("A", "B")],
+    );
+    const steps = runWorkflow(workflow);
+    const step = steps.find((step) => step.nodeId === "B");
+    if (!step) {
+      throw new Error('No step recorded for node "B"');
+    }
+    return step;
+  }
+
+  it("succeeds for an order with a valid id, total, and currency", () => {
+    const step = runValidateOrder({ id: "ORD-1", total: 42, currency: "USD" });
+
+    expect(step.status).toBe("success");
+    expect(step.detail).toBe("Order ORD-1 validation passed.");
+  });
+
+  it("fails when the order is missing from the payload", () => {
+    const step = runValidateOrder(undefined);
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe("Order is missing or invalid.");
+  });
+
+  it("fails when the order id is missing or blank", () => {
+    const step = runValidateOrder({ total: 42, currency: "USD" });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe("Order ID is missing or invalid.");
+  });
+
+  it("fails when the total is missing or not positive", () => {
+    const step = runValidateOrder({ id: "ORD-1", total: 0, currency: "USD" });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe("Order ORD-1 validation failed: total is invalid.");
+  });
+
+  it("fails when the currency is missing or blank", () => {
+    const step = runValidateOrder({ id: "ORD-1", total: 42, currency: "" });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Order ORD-1 validation failed: currency is missing or invalid.",
+    );
+  });
+});

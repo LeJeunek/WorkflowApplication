@@ -56,7 +56,9 @@ export type ActionConfig =
   | { kind: "send_email"; recipient?: string }
   | { kind: "http_request"; url: string; method: "GET" | "POST" }
   | { kind: "add_tag"; tag: string }
-  | { kind: "slack_message"; channel: string; message: string };
+  | { kind: "slack_message"; channel: string; message: string }
+  | { kind: "validate_order" }
+  | { kind: "cancel_order" };
 
 /** Every {@link ActionConfig} variant, keyed by its `kind` tag. */
 export type ActionConfigKind = ActionConfig["kind"];
@@ -67,6 +69,8 @@ export const ACTION_CONFIG_KINDS: readonly ActionConfigKind[] = [
   "http_request",
   "add_tag",
   "slack_message",
+  "validate_order",
+  "cancel_order"
 ];
 
 /** The comparisons a Condition node's branch can test for. */
@@ -154,6 +158,18 @@ export interface Workflow {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   createdAt: IsoDateString;
+  updatedAt: IsoDateString;
+}
+
+/**
+ * A saved workflow's row in the workflow-switcher list -- everything except
+ * `nodes`/`edges`, which the list view has no use for and would otherwise
+ * make the list request needlessly heavy.
+ */
+export interface WorkflowSummary {
+  id: WorkflowId;
+  name: string;
+  description?: string;
   updatedAt: IsoDateString;
 }
 

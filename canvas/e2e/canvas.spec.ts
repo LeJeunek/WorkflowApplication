@@ -313,24 +313,27 @@ test("a node added from the palette can immediately be used as a connection sour
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 });
 
-test("a renamed workflow and an added node survive a page reload", async ({
+test("an unsaved rename and added node do not survive a page reload", async ({
   page,
 }) => {
+  // Persistence is now explicit (the Save button/server), not an automatic
+  // localStorage snapshot on every edit -- a reload before Save is meant to
+  // lose in-progress work, the same way closing an unsaved document in any
+  // other editor would. See e2e/workflowPersistence.spec.ts for the
+  // save-then-reload path that *does* survive.
   await page.getByLabel("Workflow name").fill("Reload Survives");
   await page.getByRole("button", { name: "Add Action node" }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(2);
+  await expect(page.getByRole("banner").getByText("Unsaved changes")).toBeVisible();
 
   await page.reload();
 
-  // Re-establish the same "app has finished mounting" signal the top-level
-  // beforeEach uses -- a reload tears down and remounts the whole page.
   await expect(page.locator('[data-id="trigger-new-customer"]')).toBeVisible();
 
   await expect(page.getByLabel("Workflow name")).toHaveValue(
-    "Reload Survives",
+    "Untitled Workflow",
   );
-  await expect(page.locator(".react-flow__node")).toHaveCount(2);
-  await expect(page.getByText("New Action")).toBeVisible();
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
 });
 
 test("the trigger's Example data defaults to a simple field editor, and editing a row changes what Run sees", async ({
@@ -530,7 +533,7 @@ test("a full example: branching into a Slack message and an Add tag action, with
   // Built entirely through the UI, so it's structurally valid throughout --
   // every rule validateWorkflow checks is already enforced incrementally
   // by connectNodes/deleteNode as the graph is built.
-  await expect(page.getByText("Valid")).toBeVisible();
+  await expect(page.getByText("Valid", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Run workflow" }).click();
 
@@ -550,37 +553,32 @@ test("a corrupted saved workflow is flagged as invalid and Run is disabled", asy
 }) => {
   // This shape can never arise through the app's own UI -- connectNodes
   // rejects a connection to a nonexistent node before it's ever created.
-  // It simulates the one real way an invalid Workflow reaches this app:
-  // hand-edited localStorage, or a document saved by an older schema.
+  // It simulates the one real way an invalid Workflow reaches this app: a
+  // document saved by an older schema, or hand-edited server data. Loading
+  // is now a GET against the server (see openWorkflow in workflowStore.ts),
+  // so the corrupted shape is injected by mocking that response rather than
+  // hand-writing localStorage.
+  const corruptedWorkflow = {
+    id: "corrupted",
+    name: "Corrupted Workflow",
+    nodes: [
+      {
+        id: "trigger-1",
+        type: "trigger",
+        position: { x: 0, y: 0 },
+        data: { label: "A", config: { kind: "event", event: "test" } },
+      },
+    ],
+    edges: [{ id: "edge-1", source: "trigger-1", target: "does-not-exist" }],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  await page.route("**/api/workflows/corrupted", (route) =>
+    route.fulfill({ json: corruptedWorkflow }),
+  );
   await page.evaluate(() => {
-    localStorage.setItem(
-      "canvas:workflow",
-      JSON.stringify({
-        state: {
-          workflow: {
-            id: "corrupted",
-            name: "Corrupted Workflow",
-            nodes: [
-              {
-                id: "trigger-1",
-                type: "trigger",
-                position: { x: 0, y: 0 },
-                data: {
-                  label: "A",
-                  config: { kind: "event", event: "test" },
-                },
-              },
-            ],
-            edges: [
-              { id: "edge-1", source: "trigger-1", target: "does-not-exist" },
-            ],
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          },
-        },
-        version: 1,
-      }),
-    );
+    localStorage.setItem("canvas:lastWorkflowId", "corrupted");
   });
   await page.reload();
 

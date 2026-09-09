@@ -1,10 +1,13 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as remoteWorkflows from "../state/remoteWorkflows";
 import { useWorkflowStore } from "../state/workflowStore";
 import type { Workflow } from "../types";
 import { WorkflowHeader } from "./WorkflowHeader";
+
+vi.mock("../state/remoteWorkflows");
 
 const EMPTY_WORKFLOW: Workflow = {
   id: "test-workflow",
@@ -35,10 +38,19 @@ beforeEach(() => {
     past: [],
     future: [],
     lastCommit: null,
+    workflowList: [],
+    isLoadingList: false,
+    isSaving: false,
+    isDirty: false,
+    isNew: true,
+    saveError: null,
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("WorkflowHeader", () => {
   it("shows the workflow's current name", () => {
@@ -158,5 +170,51 @@ describe("WorkflowHeader", () => {
 
     expect(useWorkflowStore.getState().workflow).toEqual(WORKFLOW_WITH_TRIGGER);
     expect(useWorkflowStore.getState().future).toEqual([]);
+  });
+
+  it("disables Save when there are no unsaved changes", () => {
+    render(<WorkflowHeader />);
+
+    expect(screen.getByRole("button", { name: "Save workflow" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("enables Save once the workflow is dirty, and clicking it saves", async () => {
+    vi.mocked(remoteWorkflows.createWorkflow).mockResolvedValue({
+      ...EMPTY_WORKFLOW,
+      updatedAt: "2026-01-01T00:05:00.000Z",
+    });
+    useWorkflowStore.setState({ isDirty: true, isNew: true });
+    render(<WorkflowHeader />);
+
+    const saveButton = screen.getByRole("button", { name: "Save workflow" });
+    expect(saveButton).toHaveProperty("disabled", false);
+
+    fireEvent.click(saveButton);
+    await vi.waitFor(() => expect(useWorkflowStore.getState().isDirty).toBe(false));
+
+    expect(remoteWorkflows.createWorkflow).toHaveBeenCalledWith(
+      EMPTY_WORKFLOW.id,
+      expect.objectContaining({ name: EMPTY_WORKFLOW.name }),
+    );
+  });
+
+  it("shows 'Unsaved changes' while dirty and 'Saved' once clean", () => {
+    render(<WorkflowHeader />);
+    expect(screen.getByText("Saved")).toBeDefined();
+
+    useWorkflowStore.setState({ isDirty: true });
+    cleanup();
+    render(<WorkflowHeader />);
+    expect(screen.getByText("Unsaved changes")).toBeDefined();
+  });
+
+  it("shows 'Save failed' when the last save errored", () => {
+    useWorkflowStore.setState({ saveError: "Failed to save workflow: 500" });
+    render(<WorkflowHeader />);
+
+    expect(screen.getByText("Save failed")).toBeDefined();
   });
 });

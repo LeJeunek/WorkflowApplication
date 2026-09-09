@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 import {
   isActionConfig,
@@ -8,11 +7,14 @@ import {
 } from "../domain/config";
 import { runWorkflow as runWorkflowDomain } from "../domain/execution";
 import { canConnect } from "../domain/graph";
+import { setLastOpenedWorkflowId } from "./persistence";
 import {
-  PERSISTENCE_KEY,
-  PERSISTENCE_VERSION,
-  workflowStorage,
-} from "./persistence";
+  createWorkflow as createRemoteWorkflow,
+  deleteWorkflow as deleteRemoteWorkflow,
+  fetchWorkflow,
+  listWorkflows,
+  saveWorkflow as saveRemoteWorkflow,
+} from "./remoteWorkflows";
 import type {
   ActionConfig,
   ConditionBranch,
@@ -23,9 +25,11 @@ import type {
   Workflow,
   WorkflowEdge,
   WorkflowEdgeId,
+  WorkflowId,
   WorkflowNode,
   WorkflowNodeId,
   WorkflowRun,
+  WorkflowSummary,
 } from "../types";
 
 /**
@@ -148,6 +152,29 @@ export interface WorkflowStore {
 
   undo: () => void;
   redo: () => void;
+
+  /** Rows for the workflow-switcher list (see WorkflowSwitcher.tsx). */
+  workflowList: WorkflowSummary[];
+  isLoadingList: boolean;
+  /** Fetches (or refreshes) `workflowList` from the server. */
+  loadWorkflowList: () => Promise<void>;
+
+  isSaving: boolean;
+  /** True once `workflow` has changed since it was last loaded from or saved to the server. */
+  isDirty: boolean;
+  /** True when `workflow` has never been saved -- `saveWorkflow` creates rather than updates. */
+  isNew: boolean;
+  /** Message from the most recent failed save/open/delete, or null. */
+  saveError: string | null;
+
+  /** Replaces `workflow` with the given saved document, fetched from the server. */
+  openWorkflow: (id: WorkflowId) => Promise<void>;
+  /** Replaces `workflow` with a fresh, unsaved, blank document. */
+  newWorkflow: () => void;
+  /** Creates (if `isNew`) or updates the current `workflow` on the server. */
+  saveWorkflow: () => Promise<void>;
+  /** Deletes a saved workflow; if it's the one currently open, falls back to a new blank document. */
+  deleteWorkflow: (id: WorkflowId) => Promise<void>;
 }
 
 export const COLUMN_SPACING = 240;
@@ -246,7 +273,7 @@ function commitWorkflow(
   state: WorkflowStore,
   computeNext: (workflow: Workflow) => Workflow,
   coalesce?: CoalesceOptions,
-): Pick<WorkflowStore, "workflow" | "past" | "future" | "lastCommit"> {
+): Pick<WorkflowStore, "workflow" | "past" | "future" | "lastCommit" | "isDirty"> {
   const nextWorkflow = computeNext(state.workflow);
 
   if (nextWorkflow === state.workflow) {
@@ -255,6 +282,7 @@ function commitWorkflow(
       past: state.past,
       future: state.future,
       lastCommit: state.lastCommit,
+      isDirty: state.isDirty,
     };
   }
 
@@ -270,6 +298,46 @@ function commitWorkflow(
     past: shouldCoalesce ? state.past : [...state.past, state.workflow],
     future: [],
     lastCommit: coalesce ? { key: coalesce.key, at } : null,
+    // Every real (non-no-op) edit means the server no longer has the
+    // latest version -- this is the one seam every mutating action already
+    // passes through, so it's the only place this needs to be set.
+    isDirty: true,
+  };
+}
+
+/**
+ * The state to reset alongside swapping in a different `workflow` document
+ * -- shared by `openWorkflow` and `newWorkflow`, since both mean "the
+ * document under the cursor is now a different one." Undo history,
+ * selection, and the last simulated run all describe the *previous*
+ * document; carrying any of them over would let, for example, Ctrl+Z on
+ * workflow B undo an edit that actually happened to workflow A.
+ */
+function sessionResetFor(
+  workflow: Workflow,
+  { isNew }: { isNew: boolean },
+): Pick<
+  WorkflowStore,
+  | "workflow"
+  | "selectedNodeId"
+  | "lastRun"
+  | "past"
+  | "future"
+  | "lastCommit"
+  | "isDirty"
+  | "isNew"
+  | "saveError"
+> {
+  return {
+    workflow,
+    selectedNodeId: null,
+    lastRun: null,
+    past: [],
+    future: [],
+    lastCommit: null,
+    isDirty: false,
+    isNew,
+    saveError: null,
   };
 }
 
@@ -310,10 +378,16 @@ const INITIAL_WORKFLOW: Workflow = {
   updatedAt: SEED_TIMESTAMP,
 };
 
-export const useWorkflowStore = create<WorkflowStore>()(
-  persist(
-    (set) => ({
+export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       workflow: INITIAL_WORKFLOW,
+
+      workflowList: [],
+      isLoadingList: false,
+      isSaving: false,
+      isDirty: false,
+      // The seed workflow has never been saved -- the first Save creates it.
+      isNew: true,
+      saveError: null,
 
       selectedNodeId: null,
 
@@ -350,6 +424,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
             past: state.past.slice(0, -1),
             future: [...state.future, state.workflow],
             lastCommit: null,
+            isDirty: true,
             selectedNodeId: previous.nodes.some(
               (node) => node.id === state.selectedNodeId,
             )
@@ -370,6 +445,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
             past: [...state.past, state.workflow],
             future: state.future.slice(0, -1),
             lastCommit: null,
+            isDirty: true,
             selectedNodeId: next.nodes.some(
               (node) => node.id === state.selectedNodeId,
             )
@@ -631,14 +707,111 @@ export const useWorkflowStore = create<WorkflowStore>()(
             { key: "renameWorkflow", windowMs: 800 },
           ),
         ),
-    }),
-    {
-      name: PERSISTENCE_KEY,
-      version: PERSISTENCE_VERSION,
-      storage: workflowStorage,
-      // selectedNodeId/past/future are ephemeral UI/session state, not
-      // part of the saved document.
-      partialize: (state) => ({ workflow: state.workflow }),
-    },
-  ),
-);
+
+      loadWorkflowList: async () => {
+        set({ isLoadingList: true });
+        try {
+          const workflowList = await listWorkflows();
+          set({ workflowList, isLoadingList: false });
+        } catch {
+          // The switcher list is a nicety, not the document itself -- a
+          // failed refresh just leaves the previous (possibly empty) list
+          // in place rather than blocking or erroring the whole app.
+          set({ isLoadingList: false });
+        }
+      },
+
+      openWorkflow: async (id) => {
+        try {
+          const workflow = await fetchWorkflow(id);
+          set(sessionResetFor(workflow, { isNew: false }));
+          setLastOpenedWorkflowId(id);
+        } catch (error) {
+          set({
+            saveError:
+              error instanceof Error ? error.message : "Failed to open workflow.",
+          });
+          throw error;
+        }
+      },
+
+      newWorkflow: () => {
+        const timestamp = now();
+        set(
+          sessionResetFor(
+            {
+              id: crypto.randomUUID(),
+              name: "Untitled Workflow",
+              nodes: [],
+              edges: [],
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+            { isNew: true },
+          ),
+        );
+      },
+
+      saveWorkflow: async () => {
+        const { workflow, isNew } = get();
+        set({ isSaving: true, saveError: null });
+
+        const input = {
+          name: workflow.name,
+          description: workflow.description,
+          nodes: workflow.nodes,
+          edges: workflow.edges,
+        };
+
+        try {
+          const saved = isNew
+            ? await createRemoteWorkflow(workflow.id, input)
+            : await saveRemoteWorkflow(workflow.id, input);
+          set((state) => ({
+            workflow: saved,
+            isSaving: false,
+            isDirty: false,
+            isNew: false,
+            // Upserted locally (not re-fetched) so a first save shows up in
+            // the switcher immediately -- server ordering is by `updatedAt`
+            // desc, and this save is now the newest entry by construction.
+            workflowList: [
+              {
+                id: saved.id,
+                name: saved.name,
+                description: saved.description,
+                updatedAt: saved.updatedAt,
+              },
+              ...state.workflowList.filter((row) => row.id !== saved.id),
+            ],
+          }));
+          setLastOpenedWorkflowId(saved.id);
+        } catch (error) {
+          set({
+            isSaving: false,
+            saveError:
+              error instanceof Error ? error.message : "Failed to save workflow.",
+          });
+        }
+      },
+
+      deleteWorkflow: async (id) => {
+        try {
+          await deleteRemoteWorkflow(id);
+        } catch (error) {
+          set({
+            saveError:
+              error instanceof Error ? error.message : "Failed to delete workflow.",
+          });
+          throw error;
+        }
+
+        set((state) => ({
+          workflowList: state.workflowList.filter((row) => row.id !== id),
+        }));
+
+        if (get().workflow.id === id) {
+          get().newWorkflow();
+        }
+      },
+}));

@@ -17,6 +17,7 @@ const SLACK_ACTION: ActionConfig = {
   channel: "#general",
   message: "hi",
 };
+const VALIDATE_ORDER_ACTION: ActionConfig = { kind: "validate_order" };
 const CONDITION: ConditionConfig = { field: "", operator: "equals", value: "" };
 
 describe("isTriggerConfig", () => {
@@ -31,6 +32,7 @@ describe("isTriggerConfig", () => {
     expect(isTriggerConfig(HTTP_ACTION)).toBe(false);
     expect(isTriggerConfig(ADD_TAG_ACTION)).toBe(false);
     expect(isTriggerConfig(SLACK_ACTION)).toBe(false);
+    expect(isTriggerConfig(VALIDATE_ORDER_ACTION)).toBe(false);
     expect(isTriggerConfig(CONDITION)).toBe(false);
   });
 });
@@ -41,6 +43,7 @@ describe("isActionConfig", () => {
     expect(isActionConfig(HTTP_ACTION)).toBe(true);
     expect(isActionConfig(ADD_TAG_ACTION)).toBe(true);
     expect(isActionConfig(SLACK_ACTION)).toBe(true);
+    expect(isActionConfig(VALIDATE_ORDER_ACTION)).toBe(true);
   });
 
   it("rejects a trigger or condition config", () => {

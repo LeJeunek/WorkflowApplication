@@ -3,17 +3,31 @@ import { AlertTriangle, Check, Maximize } from 'lucide-react';
 
 import { validateWorkflow } from '../domain/validation';
 import { useWorkflowStore } from '../state/workflowStore';
+import { SAVE_STATUS_PRESENTATION, getSaveStatus } from './saveStatusPresentation';
 
 /** Bottom rail carrying ambient document and viewport state. */
 export function WorkflowStatusBar() {
   const workflow = useWorkflowStore((state) => state.workflow);
   const validation = useMemo(() => validateWorkflow(workflow), [workflow]);
 
+  const isSaving = useWorkflowStore((state) => state.isSaving);
+  const isDirty = useWorkflowStore((state) => state.isDirty);
+  const saveError = useWorkflowStore((state) => state.saveError);
+  const saveStatus = getSaveStatus({ isSaving, isDirty, saveError });
+  const saveStatusPresentation = SAVE_STATUS_PRESENTATION[saveStatus];
+  const SaveStatusIcon = saveStatusPresentation.icon;
+
   return (
     <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-line bg-surface px-3 text-[11px] text-ink-faint">
-      <span className="inline-flex items-center gap-1.5">
-        <Check className="size-3 text-trigger" aria-hidden="true" />
-        Saved
+      <span
+        className="inline-flex items-center gap-1.5"
+        title={saveStatus === "error" ? (saveError ?? undefined) : undefined}
+      >
+        <SaveStatusIcon
+          className={`size-3 ${saveStatusPresentation.className}`}
+          aria-hidden="true"
+        />
+        {saveStatusPresentation.label}
       </span>
 
       {validation.valid ? (

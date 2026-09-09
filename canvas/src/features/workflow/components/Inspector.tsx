@@ -58,6 +58,8 @@ const ACTION_CONFIG_KIND_LABELS: Record<ActionConfigKind, string> = {
   http_request: "Call a website",
   add_tag: "Add tag",
   slack_message: "Slack message",
+  validate_order: "Validate order",
+  cancel_order: "Cancel order",
 };
 
 /**
@@ -101,6 +103,10 @@ function defaultActionConfig(kind: ActionConfigKind): ActionConfig {
       return { kind: "add_tag", tag: "" };
     case "slack_message":
       return { kind: "slack_message", channel: "", message: "" };
+    case "validate_order":
+      return { kind: "validate_order" };
+    case "cancel_order":
+      return { kind: "cancel_order" };
   }
 }
 
@@ -300,42 +306,51 @@ function ActionConfigFields({
     );
   }
 
+  if (config.kind === "slack_message") {
+    return (
+      <>
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-faint">Channel</span>
+
+          <input
+            type="text"
+            aria-label="Channel"
+            value={config.channel}
+            placeholder="#general"
+            onChange={(event) =>
+              onChange({ ...config, channel: event.target.value })
+            }
+            className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+          />
+          <FieldHint>
+            Which Slack channel the simulated message would be posted to.
+          </FieldHint>
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-faint">Message</span>
+
+          <input
+            type="text"
+            aria-label="Message"
+            value={config.message}
+            placeholder="Welcome to the team!"
+            onChange={(event) =>
+              onChange({ ...config, message: event.target.value })
+            }
+            className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
+          />
+          <FieldHint>The text of the simulated message.</FieldHint>
+        </label>
+      </>
+    );
+  }
+
   return (
-    <>
-      <label className="block">
-        <span className="mb-1 block text-xs text-ink-faint">Channel</span>
-
-        <input
-          type="text"
-          aria-label="Channel"
-          value={config.channel}
-          placeholder="#general"
-          onChange={(event) =>
-            onChange({ ...config, channel: event.target.value })
-          }
-          className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-        />
-        <FieldHint>
-          Which Slack channel the simulated message would be posted to.
-        </FieldHint>
-      </label>
-
-      <label className="block">
-        <span className="mb-1 block text-xs text-ink-faint">Message</span>
-
-        <input
-          type="text"
-          aria-label="Message"
-          value={config.message}
-          placeholder="Welcome to the team!"
-          onChange={(event) =>
-            onChange({ ...config, message: event.target.value })
-          }
-          className="w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-sm text-ink outline-none transition-colors focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-        />
-        <FieldHint>The text of the simulated message.</FieldHint>
-      </label>
-    </>
+    <p className="text-xs text-ink-faint">
+      Checks the trigger's sample payload against order validity rules. No
+      configuration needed.
+    </p>
   );
 }
 

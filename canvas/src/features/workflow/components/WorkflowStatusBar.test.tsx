@@ -29,7 +29,13 @@ const VALID_WORKFLOW: Workflow = {
 };
 
 beforeEach(() => {
-  useWorkflowStore.setState({ workflow: VALID_WORKFLOW, selectedNodeId: null });
+  useWorkflowStore.setState({
+    workflow: VALID_WORKFLOW,
+    selectedNodeId: null,
+    isSaving: false,
+    isDirty: false,
+    saveError: null,
+  });
 });
 
 afterEach(cleanup);
@@ -77,5 +83,28 @@ describe("WorkflowStatusBar", () => {
     render(<WorkflowStatusBar />);
 
     expect(screen.getByText("2 issues")).toBeDefined();
+  });
+
+  it("shows Saved when there are no unsaved changes", () => {
+    render(<WorkflowStatusBar />);
+    expect(screen.getByText("Saved")).toBeDefined();
+  });
+
+  it("shows Unsaved changes while dirty", () => {
+    useWorkflowStore.setState({ isDirty: true });
+    render(<WorkflowStatusBar />);
+    expect(screen.getByText("Unsaved changes")).toBeDefined();
+  });
+
+  it("shows Saving… while a save is in flight", () => {
+    useWorkflowStore.setState({ isSaving: true, isDirty: true });
+    render(<WorkflowStatusBar />);
+    expect(screen.getByText("Saving…")).toBeDefined();
+  });
+
+  it("shows Save failed when the last save errored", () => {
+    useWorkflowStore.setState({ saveError: "Failed to save workflow: 500" });
+    render(<WorkflowStatusBar />);
+    expect(screen.getByText("Save failed")).toBeDefined();
   });
 });

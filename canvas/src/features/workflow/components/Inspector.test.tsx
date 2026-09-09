@@ -321,6 +321,24 @@ describe("Inspector", () => {
     });
   });
 
+  it("switching the action's Kind to Validate order shows no Channel or Message fields", () => {
+    useWorkflowStore.setState({ selectedNodeId: "action-1" });
+    render(<Inspector />);
+
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "validate_order" },
+    });
+
+    expect(screen.queryByLabelText("Channel")).toBeNull();
+    expect(screen.queryByLabelText("Message")).toBeNull();
+
+    expect(
+      useWorkflowStore
+        .getState()
+        .workflow.nodes.find((node) => node.id === "action-1")?.data.config,
+    ).toEqual({ kind: "validate_order" });
+  });
+
   it("switching the trigger's Kind to Form submission shows the Form name field", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);

@@ -2,13 +2,15 @@
 
 A visual workflow builder: drag Trigger, Action, and Condition nodes onto a canvas, wire them together, and click **Run** to simulate an actual execution — conditions get evaluated against real data, branches get taken or skipped, and every node shows what happened to it.
 
-Everything runs client-side. There's no backend and no real integrations — a "Slack message" action doesn't post to Slack, it *simulates* one and tells you what it would have sent. The point is the graph: how data flows, which branch a condition takes, and why.
+There are no real integrations — a "Slack message" action doesn't post to Slack, it *simulates* one and tells you what it would have sent. The point is the graph: how data flows, which branch a condition takes, and why.
+
+Saving workflows, on the other hand, is real: a small Express + Prisma API backs a Postgres (Neon) database, so a saved workflow is available from any device, not just the browser that created it (see [Persistence](#persistence)).
 
 ## Layout
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Canvas    [Workflow name]              ✓ Saved         [▶ Run] │
+│  Canvas  ⌄  [Workflow name]             ✓ Saved   [⤓][↶][↷][▶ Run] │
 ├───────────┬───────────────────────────────────────┬─────────────┤
 │           │                                       │             │
 │  Nodes    │              Canvas                   │  Inspector  │
@@ -21,12 +23,19 @@ Everything runs client-side. There's no backend and no real integrations — a "
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+The `⌄` next to the product mark opens the workflow switcher (see [Persistence](#persistence)); `[⤓]` is Save. Both "Saved" labels are live status, not a static label — they read "Unsaved changes" while `isDirty`, "Saving…" mid-request, and "Save failed" if the last save errored.
+
 ## Getting started
+
+The client runs standalone with no setup (all execution is simulated, see above) — persistence needs the API server and a Postgres database:
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev         # client — http://localhost:5173
+npm run server       # API — http://localhost:3001, separate terminal
 ```
+
+The server needs a real `DATABASE_URL`/`DATABASE_URL_UNPOOLED` in `canvas/.env` (copy `.env.example`, fill in values from your Neon project dashboard) and the schema applied once: `npx prisma migrate dev --name init`. Without that, the client still runs — the workflow switcher's list just stays empty and Save fails.
 
 ```bash
 npm test           # Vitest — unit + component tests
@@ -54,11 +63,11 @@ The Slack action gets a green *Succeeded* badge — hover it to see the exact me
 
 ### 2. Seeing validation catch a broken workflow
 
-The app's own UI can't actually build an invalid graph — every rule below is already enforced incrementally as you connect nodes (`connectNodes` rejects a dangling connection before it's ever created, `deleteNode` cascades edge removal so nothing is ever left dangling). So the only realistic way to see this fire is the same way it'd happen for real: a workflow saved by an older version of the app, or hand-edited storage.
+The app's own UI can't actually build an invalid graph — every rule below is already enforced incrementally as you connect nodes (`connectNodes` rejects a dangling connection before it's ever created, `deleteNode` cascades edge removal so nothing is ever left dangling). So the only realistic way to see this fire is the same way it'd happen for real: a workflow saved by an older version of the app, or corrupted data returned by the server.
 
-1. Open your browser's DevTools → Application → Local Storage, and find the `canvas:workflow` key.
-2. Edit the JSON: change one edge's `target` to a node id that doesn't exist elsewhere in the document.
-3. Reload the page.
+1. Build any workflow with a trigger connected to something, and **Save** it.
+2. In your database (Neon's SQL editor, or any Postgres client), edit that row's `edges` JSON: change one edge's `target` to a node id that doesn't exist elsewhere in the document.
+3. Reload the page (it reopens whatever was last saved) or reopen that workflow from the switcher.
 
 The status bar's "Valid" indicator turns into a red "1 issue" with the exact problem in its tooltip, and **Run** disables itself with the same explanation in its own tooltip.
 
@@ -72,7 +81,7 @@ Zustand store  →  domain model  →  canvas adapter  →  @xyflow/react
 
 - **`src/features/workflow/types.ts`** — the domain model. Plain TypeScript types with zero framework imports: no Zustand, no React Flow. `Workflow`, `WorkflowNode` (a `TriggerNode | ActionNode | ConditionNode` discriminated union), `WorkflowEdge`, and the execution types (`NodeRunResult`, `WorkflowRun`) all live here.
 - **`src/features/workflow/domain/`** — pure functions over those types. `graph.ts` (cycle detection, connection rules), `validation.ts` (whole-graph structural diagnostics), `evaluate.ts` (condition evaluation), `execution.ts` (the interpreter that walks a workflow and produces a run). None of these touch Zustand or React Flow, and none of them generate an id or a timestamp — that's the store's job, so every one of them is a plain, deterministic function you can unit test with `toEqual(...)` and nothing else.
-- **`src/features/workflow/state/workflowStore.ts`** — the canonical state, via Zustand's `persist` middleware (to `localStorage`, see below). Every mutation goes through here; this is the only place `crypto.randomUUID()` or a timestamp gets generated.
+- **`src/features/workflow/state/workflowStore.ts`** — the canonical state. Every mutation goes through here; this is the only place `crypto.randomUUID()` or a timestamp gets generated. Saving/loading are explicit actions (`saveWorkflow`, `openWorkflow`, ...) against the server, not an automatic side effect of every edit — see [Persistence](#persistence).
 - **`src/features/workflow/components/CanvasArea.tsx`** — the adapter. The only file that knows about both the domain model and React Flow's own node/edge shapes. React Flow's internal state (dragging, measured size, selection) is never treated as canonical — it's synced *from* the store, not the other way around.
 
 The payoff: the entire execution engine (evaluate → execute) was built and fully tested without a single line of UI code, then wired into the store, then given a UI — in that order, each layer verified before the next depended on it.
@@ -113,13 +122,15 @@ Both read the same `RUN_STATUS_PRESENTATION` map (`components/runStatusPresentat
 
 `domain/validation.ts` checks a whole workflow for structural problems: dangling edges, self-loops, duplicate edges, cycles, an edge into a trigger, a condition edge missing its branch, or a branch on an edge that isn't a condition's.
 
-Worth being upfront about: **the app's own UI can never actually produce any of these.** `connectNodes` enforces every one of these rules incrementally, at the moment a connection is drawn, and `deleteNode` cascades edge removal so nothing is ever left dangling. `validateWorkflow` exists as a guard against a `Workflow` that *didn't* come from those actions — a workflow saved by an earlier version of this app, or hand-edited `localStorage`. The status bar and the Run button's disabled state both surface it, but you won't see it fire through ordinary use of the app (see the "Try it" walkthrough above for how to actually trigger it).
+Worth being upfront about: **the app's own UI can never actually produce any of these.** `connectNodes` enforces every one of these rules incrementally, at the moment a connection is drawn, and `deleteNode` cascades edge removal so nothing is ever left dangling. `validateWorkflow` exists as a guard against a `Workflow` that *didn't* come from those actions — a workflow saved by an earlier version of this app, or corrupted server data. The status bar and the Run button's disabled state both surface it, but you won't see it fire through ordinary use of the app (see the "Try it" walkthrough above for how to actually trigger it).
 
 ## Persistence
 
-The active implementation is `localStorage`, via Zustand's `persist` middleware (`state/persistence.ts`). Only the `workflow` document is persisted — `selectedNodeId` and `lastRun` are both deliberately excluded as ephemeral/stale-prone state.
+Multiple named workflows live on the server, not the browser: `POST`/`PUT`/`GET`/`DELETE /api/workflows[/:id]` (`server/routes/workflows.ts`) backed by Postgres via Prisma (`prisma/schema.prisma`), with `nodes`/`edges` stored as JSON, mirroring the client's `Workflow` type exactly. `state/remoteWorkflows.ts` is the client's thin `fetch` wrapper around those five calls.
 
-A Postgres-backed persistence layer is sketched but **not installed or wired to anything**: `prisma/schema.prisma` defines the eventual table shape (`nodes`/`edges` as JSON, mirroring the client's `Workflow` type exactly), and `state/persistence.ts` has a fully commented-out `fetch`-based storage engine matching the same interface the active `localStorage` engine uses, plus an illustrative server-route sketch. `.env.example` documents the Neon connection variables it would need. None of this runs today; Prisma Client is Node-only and can't execute in this Vite client bundle, so activating it means standing up a server first.
+Saving is explicit, not automatic: `workflowStore.ts` tracks `isDirty`/`isNew`/`isSaving`/`saveError`, and `saveWorkflow()` (the header's Save button) does a `POST` the first time a workflow is saved and a `PUT` on every save after. `openWorkflow(id)` and `newWorkflow()` (the `⌄` switcher next to the workflow name, backed by `workflowList`) both reset undo history, selection, and the last run — none of those describe the document being switched to. The one thing still kept in `localStorage` (`state/persistence.ts`) is the id of the last-opened workflow, purely so a reload reopens the same document instead of always landing on a blank one; if that workflow was deleted elsewhere, `WorkflowEditor`'s mount effect falls back to a new blank one.
+
+In dev, Vite proxies `/api` to the API server (`vite.config.ts`), which runs as a separate process (`npm run server`, `server/index.ts`) — Prisma Client is Node-only and can't execute in the browser bundle. In production the same server also serves the built client (`express.static`), so there's one deployable, not two.
 
 ## Testing
 
@@ -127,11 +138,11 @@ Three layers, each testing what the layer below it can't:
 
 - **Vitest**, on `domain/` — pure functions, no rendering, no environment needed beyond Node/jsdom depending on the file.
 - **Vitest + React Testing Library**, on `components/` — jsdom, but explicitly *not* the canvas itself: jsdom has no `ResizeObserver`, which React Flow depends on to measure nodes, so `CanvasArea`/`WorkflowNode` interaction tests that need a real, measured canvas belong to the next layer instead.
-- **Playwright**, on the whole app in real Chromium — drag-and-drop, connection-drawing, and anything depending on real layout/measurement. This is also where both "Try it" examples above are actually verified, not just described.
+- **Playwright**, on the whole app in real Chromium — drag-and-drop, connection-drawing, and anything depending on real layout/measurement. This is also where both "Try it" examples above are actually verified, not just described. Persistence e2e specs (`e2e/workflowPersistence.spec.ts`) mock `/api/workflows**` with `page.route` rather than requiring a live Neon database — there's no CI pipeline in this repo and `.env` ships empty, so the suite stays runnable with zero external setup.
 
 ## Tech stack
 
-Vite · React 19 · TypeScript (strict) · [@xyflow/react](https://reactflow.dev/) · Zustand · Tailwind CSS v4 · Lucide React · Vitest · React Testing Library · Playwright.
+Vite · React 19 · TypeScript (strict) · [@xyflow/react](https://reactflow.dev/) · Zustand · Tailwind CSS v4 · Lucide React · Vitest · React Testing Library · Playwright · Express · Prisma · Postgres (Neon).
 
 ## Undo / redo
 
@@ -139,4 +150,4 @@ Every store mutation (add/move/connect/delete a node or edge, edit a field, rena
 
 ## Not built (yet)
 
-Multi-select, `duplicateNode`, and the Postgres backend sketched above but not wired up.
+Multi-select and `duplicateNode`.

@@ -1,15 +1,17 @@
 /**
  * @vitest-environment jsdom
  *
- * The store's persistence uses the real browser `localStorage`, which
+ * `openWorkflow`/`newWorkflow`/`saveWorkflow` write the last-opened workflow
+ * id to the real browser `localStorage` (see persistence.ts), which
  * Vitest's default node environment does not provide (Node itself doesn't
  * expose it as a global either). jsdom implements the actual Storage API,
- * so the persistence tests below exercise the same code path production
- * runs through, rather than a hand-rolled stand-in.
+ * so those tests exercise the same code path production runs through,
+ * rather than a hand-rolled stand-in.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PERSISTENCE_KEY, PERSISTENCE_VERSION } from "./persistence";
+import { getLastOpenedWorkflowId } from "./persistence";
+import * as remoteWorkflows from "./remoteWorkflows";
 import {
   COLUMN_SPACING,
   NODES_PER_ROW,
@@ -18,13 +20,19 @@ import {
 } from "./workflowStore";
 import type { Workflow } from "../types";
 
+vi.mock("./remoteWorkflows");
+
 // Every test in this file resets `workflow` explicitly via its own
 // `beforeEach`, so a stale localStorage entry can't change what any single
-// test observes -- but clearing it up front keeps the persistence
-// describe block below from ever reading a leftover value written by a
+// test observes -- but clearing it up front keeps the remote-workflow
+// describe blocks below from ever reading a leftover value written by a
 // previous test file sharing this worker.
 beforeEach(() => {
   localStorage.clear();
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
 });
 
 // Testing the connectNodes function in the workflowStore
@@ -1004,76 +1012,325 @@ describe("runWorkflow", () => {
   });
 });
 
-describe("persistence", () => {
+describe("isDirty", () => {
+  const CLEAN_WORKFLOW: Workflow = {
+    id: "test-workflow",
+    name: "Test Workflow",
+    nodes: [],
+    edges: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
   beforeEach(() => {
     useWorkflowStore.setState({
+      workflow: CLEAN_WORKFLOW,
+      isDirty: false,
+      past: [],
+      future: [],
+      lastCommit: null,
+    });
+  });
+
+  it("is set by a real edit going through commitWorkflow", () => {
+    useWorkflowStore.getState().renameWorkflow("Renamed");
+    expect(useWorkflowStore.getState().isDirty).toBe(true);
+  });
+
+  it("is left alone by a no-op edit", () => {
+    useWorkflowStore.getState().deleteNode("does-not-exist");
+    expect(useWorkflowStore.getState().isDirty).toBe(false);
+  });
+
+  it("is set by undo and redo, which bypass commitWorkflow", () => {
+    useWorkflowStore.getState().renameWorkflow("Renamed");
+    useWorkflowStore.setState({ isDirty: false }); // isolate undo's own effect
+
+    useWorkflowStore.getState().undo();
+    expect(useWorkflowStore.getState().isDirty).toBe(true);
+
+    useWorkflowStore.setState({ isDirty: false });
+    useWorkflowStore.getState().redo();
+    expect(useWorkflowStore.getState().isDirty).toBe(true);
+  });
+});
+
+describe("loadWorkflowList", () => {
+  it("populates workflowList from the server", async () => {
+    const rows = [
+      { id: "w1", name: "One", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "w2", name: "Two", updatedAt: "2026-01-02T00:00:00.000Z" },
+    ];
+    vi.mocked(remoteWorkflows.listWorkflows).mockResolvedValue(rows);
+
+    await useWorkflowStore.getState().loadWorkflowList();
+
+    expect(useWorkflowStore.getState().workflowList).toEqual(rows);
+    expect(useWorkflowStore.getState().isLoadingList).toBe(false);
+  });
+
+  it("clears isLoadingList even when the request fails", async () => {
+    vi.mocked(remoteWorkflows.listWorkflows).mockRejectedValue(new Error("500"));
+
+    await useWorkflowStore.getState().loadWorkflowList();
+
+    expect(useWorkflowStore.getState().isLoadingList).toBe(false);
+  });
+});
+
+describe("openWorkflow", () => {
+  const FETCHED_WORKFLOW: Workflow = {
+    id: "from-server",
+    name: "Loaded From Server",
+    nodes: [],
+    edges: [],
+    createdAt: "2026-02-01T00:00:00.000Z",
+    updatedAt: "2026-02-01T00:00:00.000Z",
+  };
+
+  beforeEach(() => {
+    useWorkflowStore.setState({
+      selectedNodeId: "stale-selection",
+      past: [{ ...FETCHED_WORKFLOW, name: "Old past entry" }],
+      future: [{ ...FETCHED_WORKFLOW, name: "Old future entry" }],
+      lastCommit: { key: "renameWorkflow", at: Date.now() },
+      isDirty: true,
+      isNew: false,
+    });
+  });
+
+  it("replaces workflow and resets session state (selection, history, dirty flag)", async () => {
+    vi.mocked(remoteWorkflows.fetchWorkflow).mockResolvedValue(FETCHED_WORKFLOW);
+
+    await useWorkflowStore.getState().openWorkflow("from-server");
+
+    const state = useWorkflowStore.getState();
+    expect(state.workflow).toEqual(FETCHED_WORKFLOW);
+    expect(state.selectedNodeId).toBeNull();
+    expect(state.past).toEqual([]);
+    expect(state.future).toEqual([]);
+    expect(state.lastCommit).toBeNull();
+    expect(state.isDirty).toBe(false);
+    expect(state.isNew).toBe(false);
+  });
+
+  it("remembers the opened id as the last-opened workflow", async () => {
+    vi.mocked(remoteWorkflows.fetchWorkflow).mockResolvedValue(FETCHED_WORKFLOW);
+
+    await useWorkflowStore.getState().openWorkflow("from-server");
+
+    expect(getLastOpenedWorkflowId()).toBe("from-server");
+  });
+
+  it("records saveError and rethrows on failure, leaving workflow untouched", async () => {
+    const currentWorkflow = useWorkflowStore.getState().workflow;
+    vi.mocked(remoteWorkflows.fetchWorkflow).mockRejectedValue(new Error("404"));
+
+    await expect(useWorkflowStore.getState().openWorkflow("missing")).rejects.toThrow(
+      "404",
+    );
+
+    expect(useWorkflowStore.getState().workflow).toBe(currentWorkflow);
+    expect(useWorkflowStore.getState().saveError).toBe("404");
+  });
+});
+
+describe("newWorkflow", () => {
+  beforeEach(() => {
+    useWorkflowStore.setState({
+      selectedNodeId: "stale-selection",
+      past: [
+        {
+          id: "x",
+          name: "x",
+          nodes: [],
+          edges: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      isDirty: true,
+      isNew: false,
+    });
+  });
+
+  it("replaces workflow with a fresh, empty, unsaved document", () => {
+    useWorkflowStore.getState().newWorkflow();
+
+    const state = useWorkflowStore.getState();
+    expect(state.workflow.nodes).toEqual([]);
+    expect(state.workflow.edges).toEqual([]);
+    expect(state.selectedNodeId).toBeNull();
+    expect(state.past).toEqual([]);
+    expect(state.isDirty).toBe(false);
+    expect(state.isNew).toBe(true);
+  });
+
+  it("gives each new workflow a distinct id", () => {
+    useWorkflowStore.getState().newWorkflow();
+    const firstId = useWorkflowStore.getState().workflow.id;
+
+    useWorkflowStore.getState().newWorkflow();
+    const secondId = useWorkflowStore.getState().workflow.id;
+
+    expect(secondId).not.toBe(firstId);
+  });
+});
+
+describe("saveWorkflow", () => {
+  const DRAFT: Workflow = {
+    id: "draft-id",
+    name: "Draft",
+    nodes: [],
+    edges: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("creates (POST) when isNew, and clears isNew/isDirty on success", async () => {
+    const saved = { ...DRAFT, updatedAt: "2026-01-01T00:05:00.000Z" };
+    vi.mocked(remoteWorkflows.createWorkflow).mockResolvedValue(saved);
+    useWorkflowStore.setState({ workflow: DRAFT, isNew: true, isDirty: true });
+
+    await useWorkflowStore.getState().saveWorkflow();
+
+    expect(remoteWorkflows.createWorkflow).toHaveBeenCalledWith(
+      "draft-id",
+      expect.objectContaining({ name: "Draft" }),
+    );
+    const state = useWorkflowStore.getState();
+    expect(state.workflow).toEqual(saved);
+    expect(state.isNew).toBe(false);
+    expect(state.isDirty).toBe(false);
+    expect(state.isSaving).toBe(false);
+  });
+
+  it("updates (PUT) when not isNew", async () => {
+    const saved = { ...DRAFT, updatedAt: "2026-01-01T00:05:00.000Z" };
+    vi.mocked(remoteWorkflows.saveWorkflow).mockResolvedValue(saved);
+    useWorkflowStore.setState({ workflow: DRAFT, isNew: false, isDirty: true });
+
+    await useWorkflowStore.getState().saveWorkflow();
+
+    expect(remoteWorkflows.saveWorkflow).toHaveBeenCalledWith(
+      "draft-id",
+      expect.objectContaining({ name: "Draft" }),
+    );
+    expect(remoteWorkflows.createWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("records saveError and leaves isDirty untouched on failure", async () => {
+    vi.mocked(remoteWorkflows.saveWorkflow).mockRejectedValue(new Error("500"));
+    useWorkflowStore.setState({ workflow: DRAFT, isNew: false, isDirty: true });
+
+    await useWorkflowStore.getState().saveWorkflow();
+
+    const state = useWorkflowStore.getState();
+    expect(state.saveError).toBe("500");
+    expect(state.isDirty).toBe(true);
+    expect(state.isSaving).toBe(false);
+  });
+
+  it("adds a newly-created workflow to workflowList without a separate fetch", async () => {
+    const saved = { ...DRAFT, updatedAt: "2026-01-01T00:05:00.000Z" };
+    vi.mocked(remoteWorkflows.createWorkflow).mockResolvedValue(saved);
+    useWorkflowStore.setState({ workflow: DRAFT, isNew: true, isDirty: true, workflowList: [] });
+
+    await useWorkflowStore.getState().saveWorkflow();
+
+    expect(useWorkflowStore.getState().workflowList).toEqual([
+      { id: "draft-id", name: "Draft", description: undefined, updatedAt: saved.updatedAt },
+    ]);
+    expect(remoteWorkflows.listWorkflows).not.toHaveBeenCalled();
+  });
+
+  it("moves an updated workflow to the front of workflowList, replacing its old row", async () => {
+    const saved = { ...DRAFT, name: "Renamed", updatedAt: "2026-01-01T00:05:00.000Z" };
+    vi.mocked(remoteWorkflows.saveWorkflow).mockResolvedValue(saved);
+    useWorkflowStore.setState({
+      workflow: { ...DRAFT, name: "Renamed" },
+      isNew: false,
+      isDirty: true,
+      workflowList: [
+        { id: "draft-id", name: "Draft", updatedAt: DRAFT.updatedAt },
+        { id: "other-id", name: "Other", updatedAt: "2026-01-01T00:01:00.000Z" },
+      ],
+    });
+
+    await useWorkflowStore.getState().saveWorkflow();
+
+    expect(useWorkflowStore.getState().workflowList).toEqual([
+      { id: "draft-id", name: "Renamed", description: undefined, updatedAt: saved.updatedAt },
+      { id: "other-id", name: "Other", updatedAt: "2026-01-01T00:01:00.000Z" },
+    ]);
+  });
+});
+
+describe("deleteWorkflow", () => {
+  it("removes the row from workflowList", async () => {
+    vi.mocked(remoteWorkflows.deleteWorkflow).mockResolvedValue(undefined);
+    useWorkflowStore.setState({
+      workflowList: [
+        { id: "w1", name: "One", updatedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "w2", name: "Two", updatedAt: "2026-01-02T00:00:00.000Z" },
+      ],
+    });
+
+    await useWorkflowStore.getState().deleteWorkflow("w1");
+
+    expect(useWorkflowStore.getState().workflowList).toEqual([
+      { id: "w2", name: "Two", updatedAt: "2026-01-02T00:00:00.000Z" },
+    ]);
+  });
+
+  it("falls back to a new blank workflow when the currently-open one is deleted", async () => {
+    vi.mocked(remoteWorkflows.deleteWorkflow).mockResolvedValue(undefined);
+    useWorkflowStore.setState({
       workflow: {
-        id: "test-workflow",
-        name: "Test Workflow",
+        id: "open-workflow",
+        name: "Open",
         nodes: [],
         edges: [],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       },
-      selectedNodeId: null,
     });
+
+    await useWorkflowStore.getState().deleteWorkflow("open-workflow");
+
+    const state = useWorkflowStore.getState();
+    expect(state.workflow.id).not.toBe("open-workflow");
+    expect(state.isNew).toBe(true);
   });
 
-  function readPersistedValue(): {
-    state: { workflow: Workflow; selectedNodeId?: unknown; lastRun?: unknown };
-    version: number;
-  } {
-    const raw = localStorage.getItem(PERSISTENCE_KEY);
-    if (raw === null) {
-      throw new Error(`Nothing persisted under "${PERSISTENCE_KEY}"`);
-    }
-    return JSON.parse(raw);
-  }
-
-  it("persists a change under the configured key and version", () => {
-    useWorkflowStore.getState().renameWorkflow("Persisted Name");
-
-    const persisted = readPersistedValue();
-    expect(persisted.version).toBe(PERSISTENCE_VERSION);
-    expect(persisted.state.workflow.name).toBe("Persisted Name");
-  });
-
-  it("does not persist selectedNodeId, which is ephemeral UI state", () => {
-    useWorkflowStore.getState().setSelectedNodeId("some-node");
-
-    const persisted = readPersistedValue();
-    expect(persisted.state.selectedNodeId).toBeUndefined();
-    expect(useWorkflowStore.getState().selectedNodeId).toBe("some-node");
-  });
-
-  it("does not persist lastRun -- a stale run would misrepresent the current workflow", () => {
-    useWorkflowStore.getState().runWorkflow();
-
-    const persisted = readPersistedValue();
-    expect(persisted.state.lastRun).toBeUndefined();
-    expect(useWorkflowStore.getState().lastRun).not.toBeNull();
-  });
-
-  it("rehydrates the store from a previously persisted workflow", async () => {
-    const persistedWorkflow: Workflow = {
-      id: "from-storage",
-      name: "Loaded From Storage",
+  it("leaves the currently-open workflow alone when a different one is deleted", async () => {
+    vi.mocked(remoteWorkflows.deleteWorkflow).mockResolvedValue(undefined);
+    const openWorkflow: Workflow = {
+      id: "open-workflow",
+      name: "Open",
       nodes: [],
       edges: [],
-      createdAt: "2026-02-01T00:00:00.000Z",
-      updatedAt: "2026-02-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
     };
-    localStorage.setItem(
-      PERSISTENCE_KEY,
-      JSON.stringify({
-        state: { workflow: persistedWorkflow },
-        version: PERSISTENCE_VERSION,
-      }),
+    useWorkflowStore.setState({ workflow: openWorkflow });
+
+    await useWorkflowStore.getState().deleteWorkflow("some-other-workflow");
+
+    expect(useWorkflowStore.getState().workflow).toBe(openWorkflow);
+  });
+
+  it("records saveError and rethrows on failure, without touching workflowList", async () => {
+    vi.mocked(remoteWorkflows.deleteWorkflow).mockRejectedValue(new Error("404"));
+    const list = [{ id: "w1", name: "One", updatedAt: "2026-01-01T00:00:00.000Z" }];
+    useWorkflowStore.setState({ workflowList: list });
+
+    await expect(useWorkflowStore.getState().deleteWorkflow("w1")).rejects.toThrow(
+      "404",
     );
 
-    await useWorkflowStore.persist.rehydrate();
-
-    expect(useWorkflowStore.getState().workflow).toEqual(persistedWorkflow);
+    expect(useWorkflowStore.getState().workflowList).toEqual(list);
+    expect(useWorkflowStore.getState().saveError).toBe("404");
   });
 });
 

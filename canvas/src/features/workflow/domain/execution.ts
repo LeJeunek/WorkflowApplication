@@ -6,6 +6,7 @@ import type {
   ConditionConfig,
   ConditionOperator,
   NodeRunResult,
+  NodeRunStatus,
   TriggerConfig,
   Workflow,
   WorkflowEdge,
@@ -22,6 +23,50 @@ function describeTrigger(config: TriggerConfig): string {
     case "form_submission":
       return `Started by the "${config.formName}" form being submitted.`;
   }
+}
+
+function validateOrder(
+  payload: Record<string, unknown>,
+): { valid: boolean; detail: string } {
+  const order = payload.order;
+
+  if (!order || typeof order !== "object") {
+    return {
+      valid: false,
+      detail: "Order is missing or invalid.",
+    };
+  }
+
+  const orderData = order as Record<string, unknown>;
+
+  if (typeof orderData.id !== "string" || orderData.id.trim() === "") {
+    return {
+      valid: false,
+      detail: "Order ID is missing or invalid.",
+    };
+  }
+
+  if (typeof orderData.total !== "number" || orderData.total <= 0) {
+    return {
+      valid: false,
+      detail: `Order ${orderData.id} validation failed: total is invalid.`,
+    };
+  }
+
+  if (
+    typeof orderData.currency !== "string" ||
+    orderData.currency.trim() === ""
+  ) {
+    return {
+      valid: false,
+      detail: `Order ${orderData.id} validation failed: currency is missing or invalid.`,
+    };
+  }
+
+  return {
+    valid: true,
+    detail: `Order ${orderData.id} validation passed.`,
+  };
 }
 
 /**
@@ -44,18 +89,49 @@ function describeCondition(config: ConditionConfig, matched: boolean): string {
 }
 
 /** Exhaustive over {@link ActionConfig}'s `kind`, same reasoning as {@link describeTrigger}. */
-function describeAction(config: ActionConfig): string {
+function describeAction(config: ActionConfig, payload: Record<string, unknown>): { status: NodeRunStatus; detail: string } {
+
   switch (config.kind) {
     case "send_email":
       return config.recipient
-        ? `Sent email to "${config.recipient}".`
-        : "Sent email.";
+        ? { status: "success", detail: `Sent email to "${config.recipient}".` }
+        : { status: "success", detail: "Sent email." };
     case "http_request":
-      return `Sent a ${config.method} request to "${config.url}".`;
+      return { status: "success", detail: `Sent a ${config.method} request to "${config.url}".` };
     case "add_tag":
-      return `Added tag "${config.tag}".`;
+      return { status: "success", detail: `Added tag "${config.tag}".` };
     case "slack_message":
-      return `Sent a Slack message to "${config.channel}".`;
+      return { status: "success", detail: `Sent a Slack message to "${config.channel}".` };
+    case "validate_order": {
+      const result = validateOrder(payload);
+
+      return {
+        status: result.valid ? "success" : "failure",
+        detail: result.detail,
+      };
+    }
+    case "cancel_order": {
+      const order = payload.order;
+      
+      if (!order || typeof order !== "object") {
+        return {
+          status: "failure",
+          detail: "Unable to cancel order: order missing data.",
+        };
+      }
+      const orderData = order as Record<string, unknown>;
+
+      if (typeof orderData.id !== "string" || orderData.id.trim() === "") {
+        return {
+          status: "failure",
+          detail: "Unable to cancel order: order ID missing or invalid.",
+        };
+      }
+      return {
+        status: "success",
+        detail: `Order ${orderData.id} has been canceled.`,
+      };
+    }
   }
 }
 
@@ -195,14 +271,25 @@ export function runWorkflow(workflow: Workflow): NodeRunResult[] {
       return;
     }
 
-    steps.push({
-      nodeId,
-      status: "success",
-      detail:
-        node.type === "trigger"
-          ? describeTrigger(node.data.config)
-          : describeAction(node.data.config),
-    });
+    if (node.type === "trigger") {
+      steps.push({
+        nodeId, 
+        status: "success",
+        detail: describeTrigger(node.data.config),
+      });
+    } else {
+      const result = describeAction(node.data.config, payload);
+      
+      steps.push({
+        nodeId,
+        status: result.status, 
+        detail: result.detail,
+      });
+
+      if (result.status === "failure") {
+        return;
+      }
+    };
 
     for (const edge of outgoing) {
       walkTaken(edge.target);
@@ -229,14 +316,14 @@ export function runWorkflow(workflow: Workflow): NodeRunResult[] {
   triggerIds.forEach(walkAll);
 
   for (const nodeId of reachable) {
-    if (!ran.has(nodeId)) {
-      steps.push({
-        nodeId,
-        status: "skipped",
-        detail: "This step was skipped because the workflow took a different path.",
-      });
-    }
+  if (!ran.has(nodeId)) {
+    steps.push({
+      nodeId,
+      status: "skipped",
+      detail: "This step was skipped because the workflow took a different path.",
+    });
   }
+} // closes for loop
 
-  return steps;
-}
+return steps;
+} 

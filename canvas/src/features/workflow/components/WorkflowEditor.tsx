@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 
+import { getLastOpenedWorkflowId } from '../state/persistence';
 import { useWorkflowStore } from '../state/workflowStore';
 import { CanvasArea } from './CanvasArea';
 import { Inspector } from './Inspector';
@@ -27,6 +28,26 @@ function isEditingText(target: EventTarget | null): boolean {
 export function WorkflowEditor() {
   const undo = useWorkflowStore((state) => state.undo);
   const redo = useWorkflowStore((state) => state.redo);
+  const loadWorkflowList = useWorkflowStore((state) => state.loadWorkflowList);
+  const openWorkflow = useWorkflowStore((state) => state.openWorkflow);
+  const newWorkflow = useWorkflowStore((state) => state.newWorkflow);
+
+  // Runs once on mount (an empty dependency array is deliberate: these
+  // actions are stable store references, and re-running this on every
+  // render would re-fetch the list and re-open the boot document forever).
+  useEffect(() => {
+    void loadWorkflowList();
+
+    const lastOpenedId = getLastOpenedWorkflowId();
+    if (lastOpenedId === null) {
+      return;
+    }
+    // The workflow may have been deleted from another device since --
+    // falling back to a blank document beats surfacing a load error for
+    // something the user can't fix from here.
+    openWorkflow(lastOpenedId).catch(() => newWorkflow());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
-import { Check, Play, Redo2, Undo2, Workflow } from 'lucide-react';
+import { Play, Redo2, Save, Undo2, Workflow } from 'lucide-react';
 
 import { validateWorkflow } from '../domain/validation';
 import { useWorkflowStore } from '../state/workflowStore';
+import { SAVE_STATUS_PRESENTATION, getSaveStatus } from './saveStatusPresentation';
+import { WorkflowSwitcher } from './WorkflowSwitcher';
 
 /**
  * Top chrome: product identity, the current workflow's name and save state,
@@ -12,6 +14,13 @@ export function WorkflowHeader() {
   const name = useWorkflowStore((state) => state.workflow.name);
   const renameWorkflow = useWorkflowStore((state) => state.renameWorkflow);
   const runWorkflow = useWorkflowStore((state) => state.runWorkflow);
+  const saveWorkflow = useWorkflowStore((state) => state.saveWorkflow);
+  const isSaving = useWorkflowStore((state) => state.isSaving);
+  const isDirty = useWorkflowStore((state) => state.isDirty);
+  const saveError = useWorkflowStore((state) => state.saveError);
+  const saveStatus = getSaveStatus({ isSaving, isDirty, saveError });
+  const saveStatusPresentation = SAVE_STATUS_PRESENTATION[saveStatus];
+  const SaveStatusIcon = saveStatusPresentation.icon;
   // A plain boolean, not a derived array -- keeps this selector from
   // triggering a re-render on every workflow change that doesn't actually
   // add or remove a trigger.
@@ -49,6 +58,10 @@ export function WorkflowHeader() {
 
       <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" />
 
+      <WorkflowSwitcher />
+
+      <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" />
+
       <div className="flex min-w-0 items-center gap-3">
         <input
           type="text"
@@ -57,13 +70,32 @@ export function WorkflowHeader() {
           onChange={(event) => renameWorkflow(event.target.value)}
           className="min-w-0 shrink truncate rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-ink-muted outline-none transition-colors hover:border-line-strong focus-visible:border-accent focus-visible:bg-elevated focus-visible:text-ink focus-visible:ring-2 focus-visible:ring-accent/30"
         />
-        <span className="hidden shrink-0 items-center gap-1.5 text-xs text-ink-faint sm:inline-flex">
-          <Check className="size-3.5 text-trigger" aria-hidden="true" />
-          Saved
+        <span
+          className="hidden shrink-0 items-center gap-1.5 text-xs text-ink-faint sm:inline-flex"
+          title={saveStatus === "error" ? (saveError ?? undefined) : undefined}
+        >
+          <SaveStatusIcon
+            className={`size-3.5 ${saveStatusPresentation.className}`}
+            aria-hidden="true"
+          />
+          {saveStatusPresentation.label}
         </span>
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          aria-label="Save workflow"
+          title="Save"
+          disabled={!isDirty || isSaving}
+          onClick={() => void saveWorkflow()}
+          className="rounded-md p-1.5 text-ink-faint transition-colors hover:bg-elevated hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+        >
+          <Save className="size-3.5" aria-hidden="true" />
+        </button>
+
+        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+
         <button
           type="button"
           aria-label="Undo"
