@@ -475,3 +475,69 @@ describe("validate_order action", () => {
     );
   });
 });
+
+describe("cancel_order action", () => {
+  function runCancelOrder(order: Record<string, unknown> | undefined) {
+    const workflow = buildWorkflow(
+      [
+        trigger("A", order ? { order } : undefined),
+        {
+          id: "B",
+          type: "action",
+          position: { x: 0, y: 0 },
+          data: { label: "B", config: { kind: "cancel_order" } },
+        },
+      ],
+      [edge("A", "B")],
+    );
+    const steps = runWorkflow(workflow);
+    const step = steps.find((step) => step.nodeId === "B");
+    if (!step) {
+      throw new Error('No step recorded for node "B"');
+    }
+    return step;
+  }
+
+  it("succeeds and reports the order id when the order is valid", () => {
+    const step = runCancelOrder({ id: "ORD-1" });
+
+    expect(step.status).toBe("success");
+    expect(step.detail).toBe("Order ORD-1 has been canceled.");
+  });
+
+  it("fails when the order is missing from the payload", () => {
+    const step = runCancelOrder(undefined);
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe("Unable to cancel order: order missing data.");
+  });
+
+  it("fails when the order is not an object", () => {
+    const workflow = buildWorkflow(
+      [
+        trigger("A", { order: "ORD-1" }),
+        {
+          id: "B",
+          type: "action",
+          position: { x: 0, y: 0 },
+          data: { label: "B", config: { kind: "cancel_order" } },
+        },
+      ],
+      [edge("A", "B")],
+    );
+    const steps = runWorkflow(workflow);
+    const step = steps.find((step) => step.nodeId === "B");
+
+    expect(step?.status).toBe("failure");
+    expect(step?.detail).toBe("Unable to cancel order: order missing data.");
+  });
+
+  it("fails when the order id is missing or blank", () => {
+    const step = runCancelOrder({ total: 42 });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to cancel order: order ID missing or invalid.",
+    );
+  });
+});
