@@ -3,18 +3,16 @@ import { fileURLToPath } from "node:url";
 
 import express from "express";
 
-import workflowsRouter from "./routes/workflows.ts";
+import app from "./app.ts";
 
-const app = express();
 const PORT = 3001;
 
-app.use(express.json());
-app.use("/api/workflows", workflowsRouter);
-
-// Single-deployable story: in production the same process serves the built
-// client and the API, so there's no separate origin/proxy to configure.
-// Dev keeps using Vite's own dev server for the client (see the `/api`
-// proxy in vite.config.ts), so this branch is inert until a real deploy.
+// Single-deployable story for a non-Vercel host: in production the same
+// process serves the built client and the API, so there's no separate
+// origin/proxy to configure. Dev keeps using Vite's own dev server for the
+// client (see the `/api` proxy in vite.config.ts), so this branch is inert
+// until a real deploy. On Vercel, this file never runs at all -- see
+// ../api/index.ts, which exports `app` directly as a serverless function.
 if (process.env.NODE_ENV === "production") {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   const distDir = path.join(dirname, "..", "dist");
