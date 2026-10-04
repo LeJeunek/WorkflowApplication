@@ -12,12 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Bundled Vercel function -- esbuild regenerates this from server/app.ts as
-# part of `npm run build` (build:api); see vercel.json for the /api rewrite
-# that routes every /api/* request to it.
-/api/index.js
-/api/index.js.map
-
 # Environment variables -- real credentials (e.g. a Neon DATABASE_URL) live
 # here. .env.example is intentionally NOT ignored: it's the checked-in
 # template with no real values.

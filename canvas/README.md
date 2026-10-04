@@ -130,7 +130,9 @@ Multiple named workflows live on the server, not the browser: `POST`/`PUT`/`GET`
 
 Saving is explicit, not automatic: `workflowStore.ts` tracks `isDirty`/`isNew`/`isSaving`/`saveError`, and `saveWorkflow()` (the header's Save button) does a `POST` the first time a workflow is saved and a `PUT` on every save after. `openWorkflow(id)` and `newWorkflow()` (the `⌄` switcher next to the workflow name, backed by `workflowList`) both reset undo history, selection, and the last run — none of those describe the document being switched to. The one thing still kept in `localStorage` (`state/persistence.ts`) is the id of the last-opened workflow, purely so a reload reopens the same document instead of always landing on a blank one; if that workflow was deleted elsewhere, `WorkflowEditor`'s mount effect falls back to a new blank one.
 
-In dev, Vite proxies `/api` to the API server (`vite.config.ts`), which runs as a separate process (`npm run server`, `server/index.ts`) — Prisma Client is Node-only and can't execute in the browser bundle. In production the same server also serves the built client (`express.static`), so there's one deployable, not two.
+In dev, Vite proxies `/api` to the API server (`vite.config.ts`), which runs as a separate process (`npm run server`, `server/index.ts`) — Prisma Client is Node-only and can't execute in the browser bundle. In production on a plain Node host, the same server also serves the built client (`express.static`), so there's one deployable, not two.
+
+**On Vercel specifically**, nothing runs `server/index.ts` — Vercel doesn't execute `app.listen()` servers. Instead `api/index.js` is a self-contained esbuild bundle of `server/app.ts` (`npm run build:api`; see `package.json`), deployed as a Vercel Function, with `vercel.json` rewriting every `/api/*` request to it. **This file is committed, not gitignored**: Vercel's Function builder scans `api/` from the repo as checked in, before the build command runs, so a gitignored/build-only version of it never actually reaches the deployment. Run `npm run build:api` and commit the result after any change to `server/`.
 
 ## Testing
 
