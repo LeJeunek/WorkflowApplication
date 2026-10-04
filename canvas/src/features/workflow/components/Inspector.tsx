@@ -60,6 +60,9 @@ const ACTION_CONFIG_KIND_LABELS: Record<ActionConfigKind, string> = {
   slack_message: "Slack message",
   validate_order: "Validate order",
   cancel_order: "Cancel order",
+  calculate_order_total: "Calculate order total",
+  manual_review: "Manual review",
+  process_shipment: "Process shipment",
 };
 
 /**
@@ -107,6 +110,12 @@ function defaultActionConfig(kind: ActionConfigKind): ActionConfig {
       return { kind: "validate_order" };
     case "cancel_order":
       return { kind: "cancel_order" };
+    case "calculate_order_total":
+      return { kind: "calculate_order_total" };
+    case "manual_review":
+      return { kind: "manual_review" };
+    case "process_shipment":
+      return { kind: "process_shipment" };
   }
 }
 
@@ -347,10 +356,7 @@ function ActionConfigFields({
   }
 
   return (
-    <p className="text-xs text-ink-faint">
-      Checks the trigger's sample payload against order validity rules. No
-      configuration needed.
-    </p>
+    <p className="text-xs text-ink-faint">This step runs automatically against the trigger's sample payload. No configuration needed.</p>
   );
 }
 

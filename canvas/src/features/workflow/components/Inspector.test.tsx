@@ -339,6 +339,32 @@ describe("Inspector", () => {
     ).toEqual({ kind: "validate_order" });
   });
 
+  it.each([
+    "calculate_order_total",
+    "manual_review",
+    "process_shipment",
+  ] as const)(
+    "switching the action's Kind to %s shows no Channel or Message fields",
+    (kind) => {
+      useWorkflowStore.setState({ selectedNodeId: "action-1" });
+      render(<Inspector />);
+
+      fireEvent.change(screen.getByLabelText("Kind"), {
+        target: { value: kind },
+      });
+
+      expect(screen.queryByLabelText("Channel")).toBeNull();
+      expect(screen.queryByLabelText("Message")).toBeNull();
+
+      expect(
+        useWorkflowStore
+          .getState()
+          .workflow.nodes.find((node) => node.id === "action-1")?.data
+          .config,
+      ).toEqual({ kind });
+    },
+  );
+
   it("switching the trigger's Kind to Form submission shows the Form name field", () => {
     useWorkflowStore.setState({ selectedNodeId: "trigger-1" });
     render(<Inspector />);

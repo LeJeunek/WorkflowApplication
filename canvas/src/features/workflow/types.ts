@@ -58,7 +58,10 @@ export type ActionConfig =
   | { kind: "add_tag"; tag: string }
   | { kind: "slack_message"; channel: string; message: string }
   | { kind: "validate_order" }
-  | { kind: "cancel_order" };
+  | { kind: "cancel_order" }
+  | { kind: "calculate_order_total" }
+  | { kind: "manual_review" }
+  | { kind: "process_shipment" };
 
 /** Every {@link ActionConfig} variant, keyed by its `kind` tag. */
 export type ActionConfigKind = ActionConfig["kind"];
@@ -70,7 +73,10 @@ export const ACTION_CONFIG_KINDS: readonly ActionConfigKind[] = [
   "add_tag",
   "slack_message",
   "validate_order",
-  "cancel_order"
+  "cancel_order",
+  "calculate_order_total",
+  "manual_review",
+  "process_shipment",
 ];
 
 /** The comparisons a Condition node's branch can test for. */

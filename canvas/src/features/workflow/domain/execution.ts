@@ -69,6 +69,66 @@ function validateOrder(
   };
 }
 
+function calculateOrderTotal(
+  payload: Record<string, unknown>,
+): { status: NodeRunStatus; detail: string } {
+  const order = payload.order;
+
+  if (!order || typeof order !== "object") {
+    return {
+      status: "failure",
+      detail: "Unable to calculate order total: order missing data.",
+    };
+  }
+
+  const orderData = order as Record<string, unknown>;
+  const { subtotal, tax, shipping } = orderData;
+
+  if (
+    typeof subtotal !== "number" ||
+    typeof tax !== "number" ||
+    typeof shipping !== "number"
+  ) {
+    return {
+      status: "failure",
+      detail:
+        "Unable to calculate order total: subtotal, tax, or shipping is missing or invalid.",
+    };
+  }
+
+  const id = typeof orderData.id === "string" ? orderData.id : "order";
+  return {
+    status: "success",
+    detail: `Calculated total for ${id}: ${subtotal + tax + shipping}.`,
+  };
+}
+
+/**
+ * The order-id check `cancel_order`, `manual_review`, and `process_shipment`
+ * all share -- each only differs in the action label its failure/success
+ * message names.
+ */
+function requireOrderId(
+  payload: Record<string, unknown>,
+  actionLabel: string,
+): { id: string } | { failureDetail: string } {
+  const order = payload.order;
+
+  if (!order || typeof order !== "object") {
+    return { failureDetail: `Unable to ${actionLabel}: order missing data.` };
+  }
+
+  const orderData = order as Record<string, unknown>;
+
+  if (typeof orderData.id !== "string" || orderData.id.trim() === "") {
+    return {
+      failureDetail: `Unable to ${actionLabel}: order ID missing or invalid.`,
+    };
+  }
+
+  return { id: orderData.id };
+}
+
 /**
  * Plain-English phrase for each {@link ConditionOperator}, used to narrate a
  * condition step ("customer.plan <phrase> "pro"") rather than showing the
@@ -111,26 +171,27 @@ function describeAction(config: ActionConfig, payload: Record<string, unknown>):
       };
     }
     case "cancel_order": {
-      const order = payload.order;
-      
-      if (!order || typeof order !== "object") {
-        return {
-          status: "failure",
-          detail: "Unable to cancel order: order missing data.",
-        };
-      }
-      const orderData = order as Record<string, unknown>;
-
-      if (typeof orderData.id !== "string" || orderData.id.trim() === "") {
-        return {
-          status: "failure",
-          detail: "Unable to cancel order: order ID missing or invalid.",
-        };
-      }
-      return {
-        status: "success",
-        detail: `Order ${orderData.id} has been canceled.`,
-      };
+      const result = requireOrderId(payload, "cancel order");
+      return "failureDetail" in result
+        ? { status: "failure", detail: result.failureDetail }
+        : { status: "success", detail: `Order ${result.id} has been canceled.` };
+    }
+    case "calculate_order_total":
+      return calculateOrderTotal(payload);
+    case "manual_review": {
+      const result = requireOrderId(payload, "flag order for manual review");
+      return "failureDetail" in result
+        ? { status: "failure", detail: result.failureDetail }
+        : { status: "success", detail: `Order ${result.id} flagged for manual review.` };
+    }
+    case "process_shipment": {
+      const result = requireOrderId(payload, "process shipment");
+      return "failureDetail" in result
+        ? { status: "failure", detail: result.failureDetail }
+        : {
+            status: "success",
+            detail: `Shipment for order ${result.id} has been processed.`,
+          };
     }
   }
 }

@@ -541,3 +541,142 @@ describe("cancel_order action", () => {
     );
   });
 });
+
+/** Shared by `manual_review` and `process_shipment`, which only need an order id, same as `cancel_order` above. */
+function runOrderIdAction(
+  kind: "manual_review" | "process_shipment",
+  order: Record<string, unknown> | undefined,
+) {
+  const workflow = buildWorkflow(
+    [
+      trigger("A", order ? { order } : undefined),
+      {
+        id: "B",
+        type: "action",
+        position: { x: 0, y: 0 },
+        data: { label: "B", config: { kind } },
+      },
+    ],
+    [edge("A", "B")],
+  );
+  const steps = runWorkflow(workflow);
+  const step = steps.find((step) => step.nodeId === "B");
+  if (!step) {
+    throw new Error('No step recorded for node "B"');
+  }
+  return step;
+}
+
+describe("manual_review action", () => {
+  it("succeeds and reports the order id when the order is valid", () => {
+    const step = runOrderIdAction("manual_review", { id: "ORD-1" });
+
+    expect(step.status).toBe("success");
+    expect(step.detail).toBe("Order ORD-1 flagged for manual review.");
+  });
+
+  it("fails when the order is missing from the payload", () => {
+    const step = runOrderIdAction("manual_review", undefined);
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to flag order for manual review: order missing data.",
+    );
+  });
+
+  it("fails when the order id is missing or blank", () => {
+    const step = runOrderIdAction("manual_review", { total: 42 });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to flag order for manual review: order ID missing or invalid.",
+    );
+  });
+});
+
+describe("process_shipment action", () => {
+  it("succeeds and reports the order id when the order is valid", () => {
+    const step = runOrderIdAction("process_shipment", { id: "ORD-1" });
+
+    expect(step.status).toBe("success");
+    expect(step.detail).toBe(
+      "Shipment for order ORD-1 has been processed.",
+    );
+  });
+
+  it("fails when the order is missing from the payload", () => {
+    const step = runOrderIdAction("process_shipment", undefined);
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to process shipment: order missing data.",
+    );
+  });
+
+  it("fails when the order id is missing or blank", () => {
+    const step = runOrderIdAction("process_shipment", { total: 42 });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to process shipment: order ID missing or invalid.",
+    );
+  });
+});
+
+describe("calculate_order_total action", () => {
+  function runCalculateOrderTotal(order: Record<string, unknown> | undefined) {
+    const workflow = buildWorkflow(
+      [
+        trigger("A", order ? { order } : undefined),
+        {
+          id: "B",
+          type: "action",
+          position: { x: 0, y: 0 },
+          data: { label: "B", config: { kind: "calculate_order_total" } },
+        },
+      ],
+      [edge("A", "B")],
+    );
+    const steps = runWorkflow(workflow);
+    const step = steps.find((step) => step.nodeId === "B");
+    if (!step) {
+      throw new Error('No step recorded for node "B"');
+    }
+    return step;
+  }
+
+  it("succeeds and reports the sum of subtotal, tax, and shipping", () => {
+    const step = runCalculateOrderTotal({
+      id: "ORD-1",
+      subtotal: 875,
+      tax: 70,
+      shipping: 15,
+    });
+
+    expect(step.status).toBe("success");
+    expect(step.detail).toBe("Calculated total for ORD-1: 960.");
+  });
+
+  it("fails when the order is missing from the payload", () => {
+    const step = runCalculateOrderTotal(undefined);
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to calculate order total: order missing data.",
+    );
+  });
+
+  it("fails when subtotal, tax, or shipping is missing or not a number", () => {
+    const step = runCalculateOrderTotal({
+      id: "ORD-1",
+      subtotal: 875,
+      tax: "70",
+      shipping: 15,
+    });
+
+    expect(step.status).toBe("failure");
+    expect(step.detail).toBe(
+      "Unable to calculate order total: subtotal, tax, or shipping is missing or invalid.",
+    );
+  });
+});
